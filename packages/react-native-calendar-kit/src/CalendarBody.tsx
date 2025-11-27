@@ -101,6 +101,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     resourcePagingEnabled,
     linkedScrollGroup,
     dateResourceItems,
+    daySnapOffsets,
     handleResourceScrollOffsetChange,
   } = useCalendar();
   const { onTouchStart, onWheel } = linkedScrollGroup.addAndGet(
@@ -374,6 +375,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                       scrollEnabled={allowHorizontalSwipe}
                       onTouchStart={onTouchStart}
                       onWheel={onWheel}
+                      snapToOffsets={daySnapOffsets}
                       onScrollOffsetChange={handleResourceScrollOffsetChange}
                       initialOffset={initialOffset}
                     />

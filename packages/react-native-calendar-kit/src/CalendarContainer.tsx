@@ -763,9 +763,26 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
     const visibleDatesArray = calendarData.visibleDatesArray;
     const resourceWidth = calendarGridWidth / resourcePerPage;
-    const dayWidth = resources.length * resourceWidth;
+    const resourcesCount = resources.length;
 
-    const offsets = visibleDatesArray.map((_, i) => i * dayWidth);
+    const offsets: number[] = [];
+
+    visibleDatesArray.forEach((_, dayIndex) => {
+      const dayStartOffset = dayIndex * resourcesCount * resourceWidth;
+
+      if (resourcesCount <= resourcePerPage) {
+        // If all resources fit in one page, only snap at the start of the day
+        offsets.push(dayStartOffset);
+      } else {
+        // Snap at every resource position that keeps all visible resources within the current day
+        // Last valid snap position is where the last resource of the day is at the right edge
+        const maxResourceStartIndex = resourcesCount - resourcePerPage;
+
+        for (let i = 0; i <= maxResourceStartIndex; i++) {
+          offsets.push(dayStartOffset + i * resourceWidth);
+        }
+      }
+    });
 
     return offsets;
   }, [

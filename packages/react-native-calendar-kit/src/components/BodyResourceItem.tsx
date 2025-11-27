@@ -59,7 +59,7 @@ const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
 
   return (
     <View style={styles.container}>
-      <ResourceBoard resources={resources} />
+      <ResourceBoard resources={resources} visibleDates={visibleDates} />
       <Animated.View
         pointerEvents="box-none"
         style={[

@@ -20,9 +20,10 @@ import UnavailableHoursByResource from './UnavailableHoursByResource';
 
 interface ResourceBoardProps {
   resources: ResourceItem[];
+  visibleDates: Record<string, { diffDays: number; unix: number }>;
 }
 
-const ResourceBoard = ({ resources }: ResourceBoardProps) => {
+const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
   const colors = useTheme((state) => state.colors);
 
   const {
@@ -160,7 +161,7 @@ const ResourceBoard = ({ resources }: ResourceBoardProps) => {
             !onLongPressBackground
           }
         />
-        <UnavailableHoursByResource resources={resources} />
+        <UnavailableHoursByResource resources={resources} visibleDates={visibleDates} />
         {_renderHorizontalLines}
       </Animated.View>
       {!!resources?.length && _renderVerticalLines}

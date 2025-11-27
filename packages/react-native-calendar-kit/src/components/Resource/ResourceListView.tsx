@@ -215,7 +215,7 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
                 : snapToInterval
         }
         pagingEnabled={isDualAxisMode ? false : pagingEnabled}
-        disableIntervalMomentum={isDualAxisMode ? true : !pagingEnabled}
+        disableIntervalMomentum={snapToOffsets ? true : isDualAxisMode ? true : !pagingEnabled}
         scrollEnabled={scrollEnabled}
         scrollEventThrottle={scrollEventThrottle}
         onTouchStart={onTouchStart}
