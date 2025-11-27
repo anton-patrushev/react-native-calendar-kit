@@ -163,7 +163,7 @@ const ResourceBoard = ({ resources }: ResourceBoardProps) => {
         <UnavailableHoursByResource resources={resources} />
         {_renderHorizontalLines}
       </Animated.View>
-      {resources.length > 1 && _renderVerticalLines}
+      {!!resources?.length && _renderVerticalLines}
     </View>
   );
 };
