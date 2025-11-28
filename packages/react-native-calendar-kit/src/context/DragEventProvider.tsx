@@ -225,16 +225,32 @@ const DragEventProvider: FC<
 
     let resourceId = draggingEvent?.resourceId;
     if (resources?.length) {
-      const totalResources = enableResourceScroll
-        ? resourcePerPage
-        : resources.length;
-      const width = columnWidth / totalResources;
-      const startIndex = enableResourceScroll
-        ? Math.round(offsetX.value / width)
-        : 0;
-      const resourceColumn = Math.floor((dragX.value - hourWidth) / width);
-      const resourceIndex = startIndex + resourceColumn;
-      resourceId = resources[resourceIndex]?.id;
+      if (enableResourceScroll) {
+        const totalResources = resources.length;
+        const resourceWidth = columnWidth / resourcePerPage;
+
+        // offsetX tracks position across all date-resource items
+        const firstVisibleItemIndex = Math.floor(offsetX.value / resourceWidth);
+        const firstVisibleResourceInDay =
+          firstVisibleItemIndex % totalResources;
+
+        // Calculate which resource column the dragX is in
+        const resourceColumn = Math.floor(
+          (dragX.value - hourWidth) / resourceWidth
+        );
+        let resourceIndex = firstVisibleResourceInDay + resourceColumn;
+
+        // Handle wrap-around
+        if (resourceIndex >= totalResources) {
+          resourceIndex = resourceIndex % totalResources;
+        }
+
+        resourceId = resources[resourceIndex]?.id;
+      } else {
+        const width = columnWidth / resources.length;
+        const resourceColumn = Math.floor((dragX.value - hourWidth) / width);
+        resourceId = resources[resourceColumn]?.id;
+      }
     }
 
     return { newStartUnix, newEndUnix, resourceId };
@@ -718,12 +734,22 @@ const DragEventProvider: FC<
             (resource) => resource.id === initialDrag.resourceId
           );
           if (resourceIndex !== -1) {
+            const totalResources = resources.length;
             const resourceWidth = columnWidth / resourcePerPage;
-            const currentResourceIndex = Math.round(
+
+            // offsetX tracks position across all date-resource items
+            const firstVisibleItemIndex = Math.floor(
               offsetX.value / resourceWidth
             );
-            const diff = resourceIndex - currentResourceIndex;
-            dragX.value = diff * resourceWidth + hourWidth + 1;
+            const firstVisibleResourceInDay =
+              firstVisibleItemIndex % totalResources;
+
+            let resourceVisualIndex = resourceIndex - firstVisibleResourceInDay;
+            if (resourceVisualIndex < 0) {
+              resourceVisualIndex += totalResources;
+            }
+
+            dragX.value = hourWidth + resourceVisualIndex * resourceWidth + 1;
           }
         } else if (
           initialDrag.resourceIndex !== undefined &&
@@ -829,12 +855,22 @@ const DragEventProvider: FC<
             (resource) => resource.id === event.resourceId
           ) ?? -1;
         if (resourceIndex !== -1) {
+          const totalResources = resources?.length ?? 0;
           const resourceWidth = columnWidth / resourcePerPage;
-          const currentResourceIndex = Math.round(
+
+          // offsetX tracks position across all date-resource items
+          const firstVisibleItemIndex = Math.floor(
             offsetX.value / resourceWidth
           );
-          const diff = resourceIndex - currentResourceIndex;
-          newDragX = diff * resourceWidth + hourWidth + 1;
+          const firstVisibleResourceInDay =
+            firstVisibleItemIndex % totalResources;
+
+          let resourceVisualIndex = resourceIndex - firstVisibleResourceInDay;
+          if (resourceVisualIndex < 0) {
+            resourceVisualIndex += totalResources;
+          }
+
+          newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
         }
       }
       dragX.value = newDragX;
@@ -913,8 +949,6 @@ const DragEventProvider: FC<
 
   const triggerDragCreateEvent = useCallback(
     (props: DateOrDateTime, event?: GestureResponderEvent) => {
-      console.log(props);
-
       if (!event?.nativeEvent?.locationX) {
         return;
       }
@@ -922,9 +956,6 @@ const DragEventProvider: FC<
       let newDragX = event.nativeEvent.locationX + hourWidth;
 
       if (enableResourceScroll) {
-        const currentResourceIndex = Math.round(
-          offsetX.value / (columnWidth / resourcePerPage)
-        );
         const selectedResourceIndex =
           resources?.findIndex(
             (resource) => resource.id === props.resourceId
@@ -932,9 +963,29 @@ const DragEventProvider: FC<
         if (selectedResourceIndex === -1) {
           return;
         }
-        const diff = selectedResourceIndex - currentResourceIndex;
-        newDragX = diff * (columnWidth / resourcePerPage) + hourWidth + 1;
+        const totalResources = resources?.length ?? 0;
+        const resourceWidth = columnWidth / resourcePerPage;
+
+        // offsetX tracks position across all date-resource items
+        // Calculate which resource column is at the left edge of viewport
+        const firstVisibleItemIndex = Math.floor(offsetX.value / resourceWidth);
+
+        // The item index within a day (modulo by total resources per day)
+        const firstVisibleResourceInDay =
+          firstVisibleItemIndex % totalResources;
+
+        // Calculate visual position of selected resource relative to viewport
+        let resourceVisualIndex =
+          selectedResourceIndex - firstVisibleResourceInDay;
+
+        // Handle wrap-around if needed
+        if (resourceVisualIndex < 0) {
+          resourceVisualIndex += totalResources;
+        }
+
+        newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
       }
+
       dragX.value = newDragX;
       const start = parseDateTime(props.dateTime, { zone: timeZone });
       const startUnix = parseDateTime(start.toISODate()).toMillis();
@@ -949,6 +1000,7 @@ const DragEventProvider: FC<
         start: { dateTime: startISO },
         end: { dateTime: endISO },
       });
+
       if (onDragCreateEventStart) {
         onDragCreateEventStart({
           start: { dateTime: startISO },

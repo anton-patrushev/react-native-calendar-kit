@@ -57,9 +57,13 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
       dateTime: dateTimeToISOString(dateObj),
     };
     if (resources) {
-      const colWidth = columnWidth / resourcePerPage;
-      const resourceIdx = Math.floor(event.nativeEvent.locationX / colWidth);
-      newProps.resourceId = resources[resourceIdx]?.id;
+      if (resources.length === 1) {
+        newProps.resourceId = resources[0]?.id;
+      } else {
+        const colWidth = columnWidth / resourcePerPage;
+        const resourceIdx = Math.floor(event.nativeEvent.locationX / colWidth);
+        newProps.resourceId = resources[resourceIdx]?.id;
+      }
     }
     onPressBackground?.(newProps, event);
   };
@@ -76,9 +80,13 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
       dateTime: dateString,
     };
     if (resources) {
-      const colWidth = columnWidth / resourcePerPage;
-      const resourceIdx = Math.floor(event.nativeEvent.locationX / colWidth);
-      newProps.resourceId = resources[resourceIdx]?.id;
+      if (resources.length === 1) {
+        newProps.resourceId = resources[0]?.id;
+      } else {
+        const colWidth = columnWidth / resourcePerPage;
+        const resourceIdx = Math.floor(event.nativeEvent.locationX / colWidth);
+        newProps.resourceId = resources[resourceIdx]?.id;
+      }
     }
     onLongPressBackground?.(newProps, event);
     if (triggerDragCreateEvent) {

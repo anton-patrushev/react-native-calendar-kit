@@ -14,40 +14,21 @@ import ResourceBoard from './Resource/ResourceBoard';
 
 interface BodyResourceItemProps {
   resources: ResourceItem[];
-  dateUnix?: number;
 }
 
-const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
-  const { spaceFromTop, hourWidth, timelineHeight, spaceFromBottom, calendarData } =
-    useBody();
-  const globalVisibleDateUnix = useDateChangedListener();
+const BodyResourceItem = ({ resources }: BodyResourceItemProps) => {
+  const { spaceFromTop, timelineHeight, spaceFromBottom } = useBody();
+  const visibleDateUnix = useDateChangedListener();
 
-  // Use provided dateUnix (dual-axis mode) or global visibleDateUnix (regular resource mode)
-  const visibleDateUnix = dateUnix ?? globalVisibleDateUnix;
-
-  // Build visibleDates for prev, current, next days
-  const visibleDates = useMemo(() => {
-    const visibleDatesArray = calendarData.visibleDatesArray;
-    const currentIndex = visibleDatesArray.indexOf(visibleDateUnix);
-
-    const data: Record<string, { diffDays: number; unix: number }> = {};
-    let diffDays = 0;
-
-    // Show prev, current, next days
-    for (let i = -1; i <= 1; i++) {
-      const index = currentIndex + i;
-      if (index >= 0 && index < visibleDatesArray.length) {
-        const unix = visibleDatesArray[index];
-        data[unix] = {
-          unix,
-          diffDays,
-        };
-        diffDays += 1;
-      }
-    }
-
-    return data;
-  }, [visibleDateUnix, calendarData.visibleDatesArray]);
+  const visibleDates = useMemo(
+    () => ({
+      [visibleDateUnix]: {
+        diffDays: 0,
+        unix: visibleDateUnix,
+      },
+    }),
+    [visibleDateUnix]
+  );
 
   const height = useDerivedValue(() => {
     return timelineHeight.value - spaceFromTop - spaceFromBottom;
@@ -65,7 +46,7 @@ const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
         style={[
           styles.content,
           {
-            left: resources ? 0 : Math.max(0, hourWidth - 1),
+            left: 0,
             top: EXTRA_HEIGHT + spaceFromTop,
           },
           animView,
