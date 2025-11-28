@@ -31,7 +31,7 @@ const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
     const currentIndex = visibleDatesArray.indexOf(visibleDateUnix);
 
     const data: Record<string, { diffDays: number; unix: number }> = {};
-    let diffDays = 1;
+    let diffDays = 0;
 
     // Show prev, current, next days
     for (let i = -1; i <= 1; i++) {
