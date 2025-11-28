@@ -153,8 +153,8 @@ const DragEventProvider: FC<
     dayBarListRef,
     enableResourceScroll,
     resourcePerPage,
-    resourcePagingEnabled,
     linkedScrollGroup,
+    daySnapOffsets,
   } = useCalendar();
   const {
     onDragSelectedEventStart,
@@ -534,46 +534,94 @@ const DragEventProvider: FC<
       return;
     }
 
-    const resourceWidth = columnWidth / resourcePerPage;
-    const totalResources = resources?.length ?? 0;
-    const maxOffset = (totalResources - resourcePerPage) * resourceWidth;
-    const shouldCancel = isNextPage
-      ? offsetX.value === maxOffset
-      : offsetX.value === 0;
-
-    if (shouldCancel) {
+    if (!daySnapOffsets || daySnapOffsets.length === 0 || !resources) {
       return;
     }
 
     const scrollInterval = () => {
       const scrollTargetDiff = Math.abs(scrollTargetX.value - offsetX.value);
       const hasScrolledToTarget = scrollTargetDiff < 2;
+
       if (!hasScrolledToTarget) {
         return;
       }
 
-      let nextOffset = 0;
-      const reverse = isNextPage ? 1 : -1;
-      if (resourcePagingEnabled) {
-        nextOffset = offsetX.value + columnWidth * reverse;
-      } else {
-        nextOffset = offsetX.value + resourceWidth * reverse;
+      // Find current snap offset index
+      const currentOffset = offsetX.value;
+      let currentSnapIndex = daySnapOffsets.findIndex(
+        (offset) => Math.abs(offset - currentOffset) < 2
+      );
+
+      // If not at a snap point, find the nearest one
+      if (currentSnapIndex === -1) {
+        currentSnapIndex = daySnapOffsets.reduce((nearestIdx, offset, idx) => {
+          const currentNearest = daySnapOffsets[nearestIdx];
+          return Math.abs(offset - currentOffset) <
+            Math.abs(currentNearest - currentOffset)
+            ? idx
+            : nearestIdx;
+        }, 0);
       }
 
-      const isCancel = isNextPage ? nextOffset > maxOffset : nextOffset < 0;
-      if (isCancel) {
+      // Calculate next snap index
+      const nextSnapIndex = isNextPage
+        ? currentSnapIndex + 1
+        : currentSnapIndex - 1;
+
+      // Check if next snap index is valid
+      if (nextSnapIndex < 0 || nextSnapIndex >= daySnapOffsets.length) {
         clearInterval(autoHScrollTimer.current);
         autoHScrollTimer.current = undefined;
         return;
       }
 
+      const nextOffset = daySnapOffsets[nextSnapIndex];
+      if (nextOffset === undefined) {
+        clearInterval(autoHScrollTimer.current);
+        autoHScrollTimer.current = undefined;
+        return;
+      }
+
+      // Determine if we're transitioning to a new day
+      const resourceWidth = calendarGridWidth / resourcePerPage;
+      const totalResources = resources.length;
+      const currentItemIndex = Math.floor(currentOffset / resourceWidth);
+      const nextItemIndex = Math.floor(nextOffset / resourceWidth);
+      const currentDayIndex = Math.floor(currentItemIndex / totalResources);
+      const nextDayIndex = Math.floor(nextItemIndex / totalResources);
+
       linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
-      runOnUI(() => {
-        scrollTargetX.value = nextOffset;
-        scrollTo(dayBarListRef, nextOffset, 0, true);
-        scrollTo(gridListRef, nextOffset, 0, true);
-        offsetX.value = nextOffset;
-      })();
+
+      if (currentDayIndex !== nextDayIndex) {
+        // Day transition - update visible date and dragStartUnix
+        const visibleDates = calendarData.visibleDatesArray;
+        const nextDateUnix = visibleDates[nextDayIndex];
+
+        if (!nextDateUnix) {
+          clearInterval(autoHScrollTimer.current);
+          autoHScrollTimer.current = undefined;
+          return;
+        }
+
+        triggerDateChanged.current = nextDateUnix;
+
+        runOnUI(() => {
+          scrollTargetX.value = nextOffset;
+          scrollTo(dayBarListRef, nextOffset, 0, true);
+          scrollTo(gridListRef, nextOffset, 0, true);
+          dragStartUnix.value = nextDateUnix;
+          roundedDragStartUnix.value = nextDateUnix;
+          offsetX.value = nextOffset;
+        })();
+      } else {
+        // Same day - just scroll
+        runOnUI(() => {
+          scrollTargetX.value = nextOffset;
+          scrollTo(dayBarListRef, nextOffset, 0, true);
+          scrollTo(gridListRef, nextOffset, 0, true);
+          offsetX.value = nextOffset;
+        })();
+      }
     };
 
     autoHScrollTimer.current = setInterval(
@@ -593,7 +641,32 @@ const DragEventProvider: FC<
         dragSelectedType.value !== 'bottom'
       ) {
         const isAtLeftEdge = curX <= hourWidth - 10;
-        const width = columnWidth * numberOfDays + hourWidth;
+        const width = enableResourceScroll
+          ? calendarGridWidth + hourWidth
+          : columnWidth * numberOfDays + hourWidth;
+        const isAtRightEdge = width - curX <= 24;
+        const isStartAutoScroll = isAtLeftEdge || isAtRightEdge;
+
+        if (isStartAutoScroll) {
+          if (enableResourceScroll) {
+            runOnJS(_startAutoResourceScroll)(isAtRightEdge);
+          } else {
+            runOnJS(_startAutoHScroll)(isAtRightEdge);
+          }
+        } else {
+          runOnJS(_stopAutoHScroll)();
+        }
+      } else if (
+        isDraggingAnim.value &&
+        isDraggingCreateAnim.value &&
+        curX !== prevX &&
+        curX !== -1
+      ) {
+        // For drag-to-create, always allow horizontal auto-scroll regardless of dragSelectedType
+        const isAtLeftEdge = curX <= hourWidth - 10;
+        const width = enableResourceScroll
+          ? calendarGridWidth + hourWidth
+          : columnWidth * numberOfDays + hourWidth;
         const isAtRightEdge = width - curX <= 24;
         const isStartAutoScroll = isAtLeftEdge || isAtRightEdge;
 
@@ -616,6 +689,9 @@ const DragEventProvider: FC<
       columnWidth,
       calendarData,
       enableResourceScroll,
+      daySnapOffsets,
+      resources,
+      resourcePerPage,
     ]
   );
 
