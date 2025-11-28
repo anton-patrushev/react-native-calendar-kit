@@ -169,7 +169,10 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
             !onLongPressBackground
           }
         />
-        <UnavailableHoursByResource resources={resources} visibleDates={visibleDates} />
+        <UnavailableHoursByResource
+          resources={resources}
+          visibleDates={visibleDates}
+        />
         {_renderHorizontalLines}
       </Animated.View>
       {!!resources?.length && _renderVerticalLines}
@@ -182,6 +185,7 @@ export default memo(ResourceBoard);
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    marginLeft: -0.5,
   },
   calendarGrid: { width: '100%' },
   touchable: { flex: 1 },
