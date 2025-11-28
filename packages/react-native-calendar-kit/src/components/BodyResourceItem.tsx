@@ -14,20 +14,23 @@ import ResourceBoard from './Resource/ResourceBoard';
 
 interface BodyResourceItemProps {
   resources: ResourceItem[];
+  dateUnix?: number;
 }
 
-const BodyResourceItem = ({ resources }: BodyResourceItemProps) => {
+const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
   const { spaceFromTop, timelineHeight, spaceFromBottom } = useBody();
-  const visibleDateUnix = useDateChangedListener();
+  const globalVisibleDateUnix = useDateChangedListener();
+
+  const targetDateUnix = dateUnix ?? globalVisibleDateUnix;
 
   const visibleDates = useMemo(
     () => ({
-      [visibleDateUnix]: {
+      [targetDateUnix]: {
         diffDays: 0,
-        unix: visibleDateUnix,
+        unix: targetDateUnix,
       },
     }),
-    [visibleDateUnix]
+    [targetDateUnix]
   );
 
   const height = useDerivedValue(() => {
@@ -52,7 +55,7 @@ const BodyResourceItem = ({ resources }: BodyResourceItemProps) => {
           animView,
         ]}>
         <Events
-          startUnix={visibleDateUnix}
+          startUnix={targetDateUnix}
           visibleDates={visibleDates}
           resources={resources}
         />
