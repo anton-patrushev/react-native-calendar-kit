@@ -21,6 +21,57 @@ export const UnavailableHoursContext = createContext<
   Store<UnavailableHoursStore> | undefined
 >(undefined);
 
+/**
+ * Merges unavailable hours from specific date and weekday sources.
+ * Specific date hours take precedence over weekday hours per resource.
+ */
+const mergeUnavailableHours = (
+  specificDateHours: UnavailableHourProps[],
+  weekdayHours: UnavailableHourProps[]
+): UnavailableHourProps[] => {
+  if (!specificDateHours.length) {
+    return weekdayHours;
+  }
+  if (!weekdayHours.length) {
+    return specificDateHours;
+  }
+
+  const merged: UnavailableHourProps[] = [];
+
+  // Get all unique resource IDs from both sources
+  const allResourceIds = new Set<string>();
+
+  [...specificDateHours, ...weekdayHours].forEach((hour) => {
+    if (hour.resourceId) {
+      allResourceIds.add(hour.resourceId);
+    }
+  });
+
+  // For each resource, specific date takes precedence over weekday
+  allResourceIds.forEach((resourceId) => {
+    const specificForResource = specificDateHours.filter(
+      (h) => h.resourceId === resourceId
+    );
+
+    if (specificForResource.length > 0) {
+      merged.push(...specificForResource);
+    } else {
+      const weekdayForResource = weekdayHours.filter(
+        (h) => h.resourceId === resourceId
+      );
+      merged.push(...weekdayForResource);
+    }
+  });
+
+  // Handle global hours (no resourceId): specific date takes precedence
+  const specificGlobal = specificDateHours.filter((h) => !h.resourceId);
+  const weekdayGlobal = weekdayHours.filter((h) => !h.resourceId);
+
+  merged.push(...(specificGlobal.length > 0 ? specificGlobal : weekdayGlobal));
+
+  return merged;
+};
+
 const UnavailableHoursProvider: FC<
   PropsWithChildren<{
     unavailableHours?:
@@ -39,27 +90,24 @@ const UnavailableHoursProvider: FC<
 
   const notifyDataChanged = useCallback(
     (date: number, offset: number = 7) => {
-      let originalData: Record<string, UnavailableHourProps[]> = {};
-      if (Array.isArray(unavailableHours)) {
-        originalData = {
-          '1': unavailableHours,
-          '2': unavailableHours,
-          '3': unavailableHours,
-          '4': unavailableHours,
-          '5': unavailableHours,
-          '6': unavailableHours,
-          '7': unavailableHours,
-        };
-      } else {
-        originalData = unavailableHours;
-      }
+      const originalData: Record<string, UnavailableHourProps[]> =
+        Array.isArray(unavailableHours)
+          ? {
+              '1': unavailableHours,
+              '2': unavailableHours,
+              '3': unavailableHours,
+              '4': unavailableHours,
+              '5': unavailableHours,
+              '6': unavailableHours,
+              '7': unavailableHours,
+            }
+          : unavailableHours;
 
       const data: Record<string, UnavailableHourProps[]> = {};
-      // Iterate over the date range
-      let startDateTime = parseDateTime(date, {zone: timeZone}).minus({
+      let startDateTime = parseDateTime(date, { zone: timeZone }).minus({
         days: offset * pagesPerSide,
       });
-      const endDateTime = parseDateTime(date, {zone: timeZone}).plus({
+      const endDateTime = parseDateTime(date, { zone: timeZone }).plus({
         days: offset * (pagesPerSide + 1),
       });
 
@@ -69,16 +117,18 @@ const UnavailableHoursProvider: FC<
         const weekDay = forceDate.weekday;
         const dateStr = forceDate.toFormat('yyyy-MM-dd');
 
-        // Get unavailable hours either by specific date or by weekday
-        const unavailableHoursByDate =
-          originalData[dateStr] || originalData[weekDay];
+        const specificDateHours = originalData[dateStr] || [];
+        const weekdayHours = originalData[weekDay] || [];
 
-        // If unavailable hours are found for this day, store them
-        if (unavailableHoursByDate) {
-          data[dateUnix] = unavailableHoursByDate;
+        const mergedHours = mergeUnavailableHours(
+          specificDateHours,
+          weekdayHours
+        );
+
+        if (mergedHours.length > 0) {
+          data[dateUnix] = mergedHours;
         }
 
-        // Move to the next day
         startDateTime = startDateTime.plus({ days: 1 });
       }
 
