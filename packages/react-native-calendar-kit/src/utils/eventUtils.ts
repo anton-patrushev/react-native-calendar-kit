@@ -742,6 +742,27 @@ const handleOverlap = (
   return packedEvents;
 };
 
+/**
+ * Normalizes offset value to pixels.
+ * Accepts either a number (pixels) or a percentage string (e.g., "10%").
+ */
+const normalizeOffset = (
+  offset: number | string,
+  availableWidth: number
+): number => {
+  if (typeof offset === 'string') {
+    const percentMatch = offset.match(/^(\d+(?:\.\d+)?)%$/);
+    if (percentMatch) {
+      const percentage = parseFloat(percentMatch[1]);
+      return (availableWidth * percentage) / 100;
+    }
+    // If it's a string but not a valid percentage, try to parse as number
+    const parsed = parseFloat(offset);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return offset;
+};
+
 interface EnhancedOverlapConfig {
   minStartDifferenceForStack: number;
   durationDiffThreshold: number;
@@ -1139,8 +1160,8 @@ export const populateEvents = (
     overlappingConfig?: {
       minStartDifferenceForStack?: number;
       durationDiffThreshold?: number;
-      stackOffset?: number;
-      containedOffset?: number;
+      stackOffset?: number | string;
+      containedOffset?: number | string;
       maxStackOffsetPercentage?: number;
       sideBySideGap?: number;
     };
@@ -1164,8 +1185,14 @@ export const populateEvents = (
           minStartDifference ??
           DEFAULT_MIN_START_DIFFERENCE,
         durationDiffThreshold: overlappingConfig.durationDiffThreshold ?? 30,
-        stackOffset: overlappingConfig.stackOffset ?? 10,
-        containedOffset: overlappingConfig.containedOffset ?? 10,
+        stackOffset: normalizeOffset(
+          overlappingConfig.stackOffset ?? 10,
+          availableWidth
+        ),
+        containedOffset: normalizeOffset(
+          overlappingConfig.containedOffset ?? 10,
+          availableWidth
+        ),
         maxStackOffsetPercentage: overlappingConfig.maxStackOffsetPercentage ?? 40,
         sideBySideGap: overlappingConfig.sideBySideGap ?? 1,
       };

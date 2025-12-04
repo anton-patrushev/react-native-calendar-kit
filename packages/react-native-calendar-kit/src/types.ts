@@ -549,19 +549,25 @@ export interface CalendarProviderProps extends ActionsProviderProps {
     durationDiffThreshold?: number;
 
     /**
-     * Horizontal offset (in pixels) for each stacked layer.
+     * Horizontal offset for each stacked layer.
+     * Can be either:
+     * - A number (pixels): `10` = 10px offset
+     * - A percentage string: `"10%"` = 10% of column width
      *
-     * Default is `10`
+     * Default is `10` (pixels)
      */
-    stackOffset?: number;
+    stackOffset?: number | string;
 
     /**
-     * Horizontal offset (in pixels) for contained/overlay layout.
+     * Horizontal offset for contained/overlay layout.
      * This is the offset applied to events that are contained within longer events.
+     * Can be either:
+     * - A number (pixels): `10` = 10px offset
+     * - A percentage string: `"10%"` = 10% of column width
      *
-     * Default is `10` (same as stackOffset)
+     * Default is `10` (pixels, same as stackOffset)
      */
-    containedOffset?: number;
+    containedOffset?: number | string;
 
     /**
      * Maximum total offset as percentage of available width.

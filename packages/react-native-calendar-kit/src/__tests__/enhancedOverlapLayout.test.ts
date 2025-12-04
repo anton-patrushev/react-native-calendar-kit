@@ -527,83 +527,6 @@ describe('Enhanced Overlap Layout', () => {
   });
 
   describe('Real World Scenario - 5 Events Analysis', () => {
-    it('analyzes overlap behavior for 5 real events', () => {
-      // Event 1: 07:00 - 08:00 (Hank Zakroff)
-      // Event 2: 07:30 - 08:30 (John Appleseed) - overlaps with Event 1
-      // Event 3: 08:00 - 09:00 (David Taylor) - overlaps with Event 2, touches Event 1 at boundary
-      // Event 4: 12:00 - 13:00 (James Hurt) - no overlap with anything
-      // Event 5: 13:55 - 14:55 (John Appleseed) - no overlap with anything
-
-      const events = [
-        createTestEvent('1', 420, 60), // 07:00 - 08:00
-        createTestEvent('2', 450, 60), // 07:30 - 08:30
-        createTestEvent('3', 480, 60), // 08:00 - 09:00
-        createTestEvent('4', 720, 60), // 12:00 - 13:00
-        createTestEvent('5', 835, 60), // 13:55 - 14:55
-      ];
-
-      const result = populateEvents(events, {
-        overlappingConfig: {
-          minStartDifferenceForStack: 30,
-          stackOffset: 10,
-          sideBySideGap: 1,
-        },
-        availableWidth: 100,
-      });
-
-      expect(result).toHaveLength(5);
-
-      const event1 = result.find((e) => e.id === '1')!;
-      const event2 = result.find((e) => e.id === '2')!;
-      const event3 = result.find((e) => e.id === '3')!;
-      const event4 = result.find((e) => e.id === '4')!;
-      const event5 = result.find((e) => e.id === '5')!;
-
-      console.log('\n=== Event Analysis ===');
-      console.log('Event 1 (07:00-08:00):', {
-        stackLevel: event1._internal.stackLevel,
-        layoutType: event1._internal.layoutType,
-        zIndex: event1._internal.zIndex,
-        widthPercentage: event1._internal.widthPercentage,
-        xOffsetPercentage: event1._internal.xOffsetPercentage,
-      });
-      console.log('Event 2 (07:30-08:30):', {
-        stackLevel: event2._internal.stackLevel,
-        layoutType: event2._internal.layoutType,
-        zIndex: event2._internal.zIndex,
-        widthPercentage: event2._internal.widthPercentage,
-        xOffsetPercentage: event2._internal.xOffsetPercentage,
-      });
-      console.log('Event 3 (08:00-09:00):', {
-        stackLevel: event3._internal.stackLevel,
-        layoutType: event3._internal.layoutType,
-        zIndex: event3._internal.zIndex,
-        widthPercentage: event3._internal.widthPercentage,
-        xOffsetPercentage: event3._internal.xOffsetPercentage,
-      });
-      console.log('Event 4 (12:00-13:00):', {
-        stackLevel: event4._internal.stackLevel,
-        layoutType: event4._internal.layoutType,
-        zIndex: event4._internal.zIndex,
-        widthPercentage: event4._internal.widthPercentage,
-        xOffsetPercentage: event4._internal.xOffsetPercentage,
-      });
-      console.log('Event 5 (13:55-14:55):', {
-        stackLevel: event5._internal.stackLevel,
-        layoutType: event5._internal.layoutType,
-        zIndex: event5._internal.zIndex,
-        widthPercentage: event5._internal.widthPercentage,
-        xOffsetPercentage: event5._internal.xOffsetPercentage,
-      });
-
-      // Just verify they all got processed
-      expect(event1).toBeDefined();
-      expect(event2).toBeDefined();
-      expect(event3).toBeDefined();
-      expect(event4).toBeDefined();
-      expect(event5).toBeDefined();
-    });
-
     it('distinguishes between side-by-side and stacked+side-by-side', () => {
       // Event 1: Base event at level 0
       // Event 2: Overlaps with Event 1, different start time -> stacked (level 1)
@@ -649,6 +572,149 @@ describe('Enhanced Overlap Layout', () => {
       expect(event4._internal.stackLevel).toBe(1);
       expect(event4._internal.layoutType).toBe('side-by-side');
       expect(event4._internal.xOffsetPercentage).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Percentage-based Offsets', () => {
+    it('applies percentage-based stackOffset correctly', () => {
+      const events = [
+        createTestEvent('1', 0, 60), // 00:00 - 01:00
+        createTestEvent('2', 30, 60), // 00:30 - 01:30
+        createTestEvent('3', 60, 60), // 01:00 - 02:00
+      ];
+
+      const result = populateEvents(events, {
+        overlappingConfig: {
+          minStartDifferenceForStack: 30,
+          stackOffset: '10%', // 10% of 200 = 20px
+        },
+        availableWidth: 200,
+      });
+
+      expect(result).toHaveLength(3);
+
+      const event1 = result.find((e) => e.id === '1')!;
+      const event2 = result.find((e) => e.id === '2')!;
+      const event3 = result.find((e) => e.id === '3')!;
+
+      expect(event1._internal.stackLevel).toBe(0);
+      expect(event1._internal.xOffsetPercentage).toBe(0);
+      expect(event1._internal.widthPercentage).toBe(100);
+
+      // Event 2 at level 1: offset = 10% of 200 = 20px = 10% of width
+      expect(event2._internal.stackLevel).toBe(1);
+      expect(event2._internal.xOffsetPercentage).toBe(10);
+      expect(event2._internal.widthPercentage).toBe(90);
+
+      // Event 3 at level 2: offset = 2 * 20px = 40px = 20% of width
+      expect(event3._internal.stackLevel).toBe(2);
+      expect(event3._internal.xOffsetPercentage).toBe(20);
+      expect(event3._internal.widthPercentage).toBe(80);
+    });
+
+    it('applies percentage-based containedOffset correctly', () => {
+      const events = [
+        createTestEvent('1', 0, 180), // 00:00 - 03:00 (long event)
+        createTestEvent('2', 30, 30), // 00:30 - 01:00 (short, contained in long)
+      ];
+
+      const result = populateEvents(events, {
+        overlappingConfig: {
+          minStartDifferenceForStack: 30,
+          durationDiffThreshold: 60,
+          stackOffset: 5,
+          containedOffset: '15%', // 15% of 100 = 15px
+        },
+        availableWidth: 100,
+      });
+
+      expect(result).toHaveLength(2);
+
+      const event1 = result.find((e) => e.id === '1')!;
+      const event2 = result.find((e) => e.id === '2')!;
+
+      // Both events will be "contained" since durationDiff (150) > threshold (60)
+      expect(event1._internal.layoutType).toBe('contained');
+      expect(event2._internal.layoutType).toBe('contained');
+
+      // Event 1 at level 0
+      expect(event1._internal.stackLevel).toBe(0);
+      expect(event1._internal.xOffsetPercentage).toBe(0);
+
+      // Event 2 at level 1, contained: offset = 0 * 5 + 1 * 15 = 15px = 15%
+      expect(event2._internal.stackLevel).toBe(1);
+      expect(event2._internal.xOffsetPercentage).toBe(15);
+      expect(event2._internal.widthPercentage).toBe(85);
+    });
+
+    it('mixes pixel and percentage offsets', () => {
+      const events = [
+        createTestEvent('1', 0, 180), // 00:00 - 03:00 (long event)
+        createTestEvent('2', 30, 30), // 00:30 - 01:00 (short, contained)
+      ];
+
+      const result = populateEvents(events, {
+        overlappingConfig: {
+          minStartDifferenceForStack: 30,
+          durationDiffThreshold: 60,
+          stackOffset: 10, // 10px
+          containedOffset: '20%', // 20% of 100 = 20px
+        },
+        availableWidth: 100,
+      });
+
+      expect(result).toHaveLength(2);
+
+      const event1 = result.find((e) => e.id === '1')!;
+      const event2 = result.find((e) => e.id === '2')!;
+
+      expect(event2._internal.layoutType).toBe('contained');
+
+      // Event 2: offset = 0 * 10px + 1 * 20px = 20px = 20%
+      expect(event2._internal.xOffsetPercentage).toBe(20);
+      expect(event2._internal.widthPercentage).toBe(80);
+    });
+
+    it('respects maxStackOffsetPercentage with percentage-based offsets', () => {
+      const events = [
+        createTestEvent('1', 0, 60),
+        createTestEvent('2', 30, 60),
+        createTestEvent('3', 60, 60),
+        createTestEvent('4', 90, 60),
+        createTestEvent('5', 120, 60),
+      ];
+
+      const result = populateEvents(events, {
+        overlappingConfig: {
+          minStartDifferenceForStack: 30,
+          stackOffset: '15%', // 15% per level
+          maxStackOffsetPercentage: 40, // Cap at 40%
+        },
+        availableWidth: 100,
+      });
+
+      expect(result).toHaveLength(5);
+
+      const event1 = result.find((e) => e.id === '1')!;
+      const event2 = result.find((e) => e.id === '2')!;
+      const event3 = result.find((e) => e.id === '3')!;
+      const event4 = result.find((e) => e.id === '4')!;
+      const event5 = result.find((e) => e.id === '5')!;
+
+      // Event 1: 0%
+      expect(event1._internal.xOffsetPercentage).toBe(0);
+
+      // Event 2: 15%
+      expect(event2._internal.xOffsetPercentage).toBe(15);
+
+      // Event 3: 30%
+      expect(event3._internal.xOffsetPercentage).toBe(30);
+
+      // Event 4: would be 45%, but capped at 40%
+      expect(event4._internal.xOffsetPercentage).toBe(40);
+
+      // Event 5: would be 60%, but capped at 40%
+      expect(event5._internal.xOffsetPercentage).toBe(40);
     });
   });
 });

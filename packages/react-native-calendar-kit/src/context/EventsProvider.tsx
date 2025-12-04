@@ -57,8 +57,9 @@ interface EventsProviderProps {
   resources?: ResourceItem[];
   overlappingConfig?: {
     minStartDifferenceForStack?: number;
-    containedEventDurationRatio?: number;
-    stackOffset?: number;
+    durationDiffThreshold?: number;
+    stackOffset?: number | string;
+    containedOffset?: number | string;
     maxStackOffsetPercentage?: number;
     sideBySideGap?: number;
   };
