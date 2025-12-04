@@ -86,6 +86,12 @@ export interface ThemeConfigs {
 
   /** Default style of the event */
   eventTitleStyle?: TextStyle;
+
+  /** Border color for overlapped/stacked events. Set to null to disable border. Default: '#FFF' */
+  overlapEventBorderColor?: string | null;
+
+  /** Border width for overlapped/stacked events. Default: 1 */
+  overlapEventBorderWidth?: number;
 }
 
 export type GoToDateOptions = {
@@ -507,9 +513,57 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * overlapping. This affects how events are positioned and displayed when
    * using 'overlap' overlapType.
    *
+   * @deprecated Use overlappingConfig instead
    * Default is `30` minutes
    */
   minStartDifference?: number;
+
+  /**
+   * Enhanced overlapping configuration for event layout.
+   * When provided, enables intelligent layout strategies (stacked, side-by-side, contained).
+   * When not provided, uses legacy overlap mode based on overlapType prop.
+   */
+  overlappingConfig?: {
+    /**
+     * Minimum start time difference (in minutes) for events to be stacked vs side-by-side.
+     * - Events starting within this threshold → side-by-side
+     * - Events starting beyond this threshold → stacked
+     *
+     * Default is `30` minutes
+     */
+    minStartDifferenceForStack?: number;
+
+    /**
+     * Duration ratio threshold for contained/overlay layout.
+     * If longerEvent.duration / shorterEvent.duration >= this value,
+     * and shorter is fully contained, use overlay layout.
+     *
+     * Default is `2`
+     */
+    containedEventDurationRatio?: number;
+
+    /**
+     * Horizontal offset (in pixels) for each stacked layer.
+     *
+     * Default is `10`
+     */
+    stackOffset?: number;
+
+    /**
+     * Maximum total offset as percentage of available width.
+     * Prevents events from being pushed too far right.
+     *
+     * Default is `40`
+     */
+    maxStackOffsetPercentage?: number;
+
+    /**
+     * Gap between side-by-side events in pixels.
+     *
+     * Default is `1`
+     */
+    sideBySideGap?: number;
+  };
 
   /** Resource list */
   resources?: ResourceItem[];
@@ -864,6 +918,9 @@ export interface PackedEvent extends EventItemInternal {
     widthPercentage?: number;
     xOffsetPercentage?: number;
     index?: number;
+    zIndex?: number;
+    stackLevel?: number;
+    layoutType?: 'stacked' | 'side-by-side' | 'contained';
   };
 }
 
