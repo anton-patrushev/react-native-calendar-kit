@@ -522,25 +522,31 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * Enhanced overlapping configuration for event layout.
    * When provided, enables intelligent layout strategies (stacked, side-by-side, contained).
    * When not provided, uses legacy overlap mode based on overlapType prop.
+   *
+   * Layout decision logic:
+   * 1. "stacked": if startTimeDiff >= minStartDifferenceForStack AND durationDiff <= durationDiffThreshold
+   * 2. "contained": if startTimeDiff >= minStartDifferenceForStack AND durationDiff > durationDiffThreshold
+   * 3. "side-by-side": if startTimeDiff < minStartDifferenceForStack (default fallback)
    */
   overlappingConfig?: {
     /**
-     * Minimum start time difference (in minutes) for events to be stacked vs side-by-side.
+     * Minimum start time difference (in minutes) for events to be stacked/contained vs side-by-side.
      * - Events starting within this threshold → side-by-side
-     * - Events starting beyond this threshold → stacked
+     * - Events starting beyond this threshold → stacked or contained (based on duration difference)
      *
      * Default is `30` minutes
      */
     minStartDifferenceForStack?: number;
 
     /**
-     * Duration ratio threshold for contained/overlay layout.
-     * If longerEvent.duration / shorterEvent.duration >= this value,
-     * and shorter is fully contained, use overlay layout.
+     * Duration difference threshold (in minutes) for stacked vs contained layout.
+     * Only applies when startTimeDiff >= minStartDifferenceForStack.
+     * - If durationDiff <= threshold → stacked layout
+     * - If durationDiff > threshold → contained layout
      *
-     * Default is `2`
+     * Default is `30` minutes
      */
-    containedEventDurationRatio?: number;
+    durationDiffThreshold?: number;
 
     /**
      * Horizontal offset (in pixels) for each stacked layer.
@@ -548,6 +554,14 @@ export interface CalendarProviderProps extends ActionsProviderProps {
      * Default is `10`
      */
     stackOffset?: number;
+
+    /**
+     * Horizontal offset (in pixels) for contained/overlay layout.
+     * This is the offset applied to events that are contained within longer events.
+     *
+     * Default is `10` (same as stackOffset)
+     */
+    containedOffset?: number;
 
     /**
      * Maximum total offset as percentage of available width.

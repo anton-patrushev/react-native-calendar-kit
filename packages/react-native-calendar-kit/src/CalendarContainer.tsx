@@ -135,6 +135,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     enableResourceScroll = false,
     resourcePerPage = 3,
     resourcePagingEnabled = false,
+    overlappingConfig,
   },
   ref
 ) => {
@@ -443,7 +444,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
         // Calculate the scroll offset for the new day
         const resourceWidth = calendarGridWidth / resourcePerPage;
-        const dayOffset = nextVisibleDayIndex * resources.length * resourceWidth;
+        const dayOffset =
+          nextVisibleDayIndex * resources.length * resourceWidth;
 
         linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
         runOnUI(() => {
@@ -512,7 +514,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
         // Calculate the scroll offset for the new day
         const resourceWidth = calendarGridWidth / resourcePerPage;
-        const dayOffset = nextVisibleDayIndex * resources.length * resourceWidth;
+        const dayOffset =
+          nextVisibleDayIndex * resources.length * resourceWidth;
 
         linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
         runOnUI(() => {
@@ -1073,7 +1076,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
                           hideWeekDays={hideWeekDays}
                           overlapType={overlapType}
                           resources={resources}
-                          minStartDifference={minStartDifference}>
+                          minStartDifference={minStartDifference}
+                          overlappingConfig={overlappingConfig}
+                          columnWidth={columnWidth}>
                           <DragEventProvider
                             dragStep={dragStep}
                             allowDragToEdit={allowDragToEdit}

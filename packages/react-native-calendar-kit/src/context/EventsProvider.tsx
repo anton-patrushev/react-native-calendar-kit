@@ -55,6 +55,14 @@ interface EventsProviderProps {
   overlapType?: 'no-overlap' | 'overlap';
   minStartDifference?: number;
   resources?: ResourceItem[];
+  overlappingConfig?: {
+    minStartDifferenceForStack?: number;
+    containedEventDurationRatio?: number;
+    stackOffset?: number;
+    maxStackOffsetPercentage?: number;
+    sideBySideGap?: number;
+  };
+  columnWidth?: number;
 }
 
 export interface EventsRef {
@@ -78,6 +86,8 @@ const EventsProvider: ForwardRefRenderFunction<
     overlapType = 'no-overlap',
     minStartDifference = DEFAULT_MIN_START_DIFFERENCE,
     resources,
+    overlappingConfig,
+    columnWidth,
   },
   ref
 ) => {
@@ -136,6 +146,8 @@ const EventsProvider: ForwardRefRenderFunction<
           overlap: overlapType === 'overlap',
           minStartDifference,
           resources,
+          overlappingConfig,
+          availableWidth: columnWidth,
         });
       });
 
@@ -190,6 +202,8 @@ const EventsProvider: ForwardRefRenderFunction<
       overlapType,
       minStartDifference,
       firstDay,
+      overlappingConfig,
+      columnWidth,
     ]
   );
 

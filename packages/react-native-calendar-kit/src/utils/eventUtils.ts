@@ -462,9 +462,11 @@ export function getVisibleDays(
 }
 
 const hasCollision = (a: EventItemInternal, b: EventItemInternal) => {
+  // Two events overlap if one starts before the other ends AND vice versa
+  // a overlaps b if: a.start < b.end AND b.start < a.end
   return (
-    a._internal.endUnix > b._internal.startUnix &&
-    a._internal.startUnix < b._internal.endUnix
+    a._internal.startUnix < b._internal.endUnix &&
+    b._internal.startUnix < a._internal.endUnix
   );
 };
 
@@ -740,41 +742,469 @@ const handleOverlap = (
   return packedEvents;
 };
 
+interface EnhancedOverlapConfig {
+  minStartDifferenceForStack: number;
+  durationDiffThreshold: number;
+  stackOffset: number;
+  containedOffset: number;
+  maxStackOffsetPercentage: number;
+  sideBySideGap: number;
+}
+
+const assignStackLevels = (
+  events: EventItemInternal[],
+  minDiffMinutes: number,
+  collisionCache: Map<string, boolean>
+): Map<EventItemInternal, number> => {
+  const levels = new Map<EventItemInternal, number>();
+  if (events.length === 0) {
+    return levels;
+  }
+
+  const sorted = [...events].sort((a, b) => {
+    if (a._internal.startUnix !== b._internal.startUnix) {
+      return a._internal.startUnix - b._internal.startUnix;
+    }
+    return b._internal.duration - a._internal.duration;
+  });
+
+  const cachedHasCollision = (a: EventItemInternal, b: EventItemInternal): boolean => {
+    const key = a.localId < b.localId ? `${a.localId}-${b.localId}` : `${b.localId}-${a.localId}`;
+    let result = collisionCache.get(key);
+    if (result === undefined) {
+      result = hasCollision(a, b);
+      collisionCache.set(key, result);
+    }
+    return result;
+  };
+
+  const levelEvents = new Map<number, EventItemInternal[]>();
+  levelEvents.set(0, [sorted[0]]);
+  levels.set(sorted[0], 0);
+
+  for (let i = 1; i < sorted.length; i++) {
+    const event = sorted[i];
+    let assignedLevel = -1;
+
+    let highestOverlapLevel = -1;
+    for (let level = 0; level < levelEvents.size; level++) {
+      const eventsInLevel = levelEvents.get(level);
+      if (eventsInLevel) {
+        for (const levelEvent of eventsInLevel) {
+          if (cachedHasCollision(levelEvent, event)) {
+            highestOverlapLevel = level;
+            break;
+          }
+        }
+      }
+    }
+
+    if (highestOverlapLevel !== -1) {
+      const eventsInHighestLevel = levelEvents.get(highestOverlapLevel)!;
+      let minStartDiff = Infinity;
+
+      for (const levelEvent of eventsInHighestLevel) {
+        if (cachedHasCollision(levelEvent, event)) {
+          const startDiff =
+            Math.abs(event._internal.startUnix - levelEvent._internal.startUnix) /
+            MILLISECONDS_IN_MINUTE;
+          minStartDiff = Math.min(minStartDiff, startDiff);
+        }
+      }
+
+      if (minStartDiff < minDiffMinutes) {
+        assignedLevel = highestOverlapLevel;
+      } else {
+        assignedLevel = highestOverlapLevel + 1;
+      }
+    } else {
+      for (let level = 0; level <= levelEvents.size; level++) {
+        const eventsInLevel = levelEvents.get(level);
+        if (!eventsInLevel || eventsInLevel.length === 0) {
+          assignedLevel = level;
+          break;
+        }
+
+        let foundCollision = false;
+        for (const levelEvent of eventsInLevel) {
+          if (cachedHasCollision(levelEvent, event)) {
+            foundCollision = true;
+            break;
+          }
+        }
+
+        if (!foundCollision) {
+          assignedLevel = level;
+          break;
+        }
+      }
+    }
+
+    if (assignedLevel === -1) {
+      assignedLevel = levelEvents.size;
+    }
+
+    if (!levelEvents.has(assignedLevel)) {
+      levelEvents.set(assignedLevel, []);
+    }
+    levelEvents.get(assignedLevel)!.push(event);
+    levels.set(event, assignedLevel);
+  }
+
+  return levels;
+};
+
+const isContainedEvent = (
+  shorter: EventItemInternal,
+  longer: EventItemInternal,
+  config: EnhancedOverlapConfig
+): boolean => {
+  const fullyContained =
+    shorter._internal.startUnix >= longer._internal.startUnix &&
+    shorter._internal.endUnix <= longer._internal.endUnix;
+
+  if (!fullyContained) {
+    return false;
+  }
+
+  // Check start time difference
+  const startDiff =
+    Math.abs(shorter._internal.startUnix - longer._internal.startUnix) /
+    MILLISECONDS_IN_MINUTE;
+  if (startDiff < config.minStartDifferenceForStack) {
+    return false; // Should be side-by-side
+  }
+
+  // Check duration difference
+  const durationDiff = Math.abs(longer._internal.duration - shorter._internal.duration);
+  return durationDiff > config.durationDiffThreshold;
+};
+
+interface LayoutResult {
+  event: EventItemInternal;
+  widthPercentage: number;
+  xOffsetPercentage: number;
+  zIndex: number;
+  layoutType: 'stacked' | 'side-by-side' | 'contained';
+}
+
+const groupOverlappingEvents = (
+  events: EventItemInternal[],
+  collisionCache: Map<string, boolean>
+): EventItemInternal[][] => {
+  if (events.length === 0) {
+    return [];
+  }
+
+  const cachedHasCollision = (a: EventItemInternal, b: EventItemInternal): boolean => {
+    const key = a.localId < b.localId ? `${a.localId}-${b.localId}` : `${b.localId}-${a.localId}`;
+    let result = collisionCache.get(key);
+    if (result === undefined) {
+      result = hasCollision(a, b);
+      collisionCache.set(key, result);
+    }
+    return result;
+  };
+
+  const sorted = [...events].sort(
+    (a, b) => a._internal.startUnix - b._internal.startUnix
+  );
+
+  const groups: EventItemInternal[][] = [];
+
+  for (const event of sorted) {
+    let targetGroup: EventItemInternal[] | null = null;
+
+    for (const group of groups) {
+      if (group.some((e) => cachedHasCollision(e, event))) {
+        targetGroup = group;
+        break;
+      }
+    }
+
+    if (targetGroup) {
+      targetGroup.push(event);
+    } else {
+      groups.push([event]);
+    }
+  }
+
+  return groups;
+};
+
+const layoutEventsInLevel = (
+  events: EventItemInternal[],
+  level: number,
+  levelOffsetPx: number,
+  availableWidth: number,
+  config: EnhancedOverlapConfig
+): LayoutResult[] => {
+  if (events.length === 0) {
+    return [];
+  }
+
+  if (events.length === 1) {
+    const offsetPercent = (levelOffsetPx / availableWidth) * 100;
+    return [
+      {
+        event: events[0],
+        widthPercentage: 100 - offsetPercent,
+        xOffsetPercentage: offsetPercent,
+        zIndex: level + 1,
+        layoutType: 'stacked',
+      },
+    ];
+  }
+
+  const sorted = [...events].sort(
+    (a, b) => b._internal.duration - a._internal.duration
+  );
+  const longest = sorted[0];
+  const others = sorted.slice(1);
+
+  const allContained = others.every((e) =>
+    isContainedEvent(e, longest, config)
+  );
+
+  if (allContained && others.length > 0) {
+    const containedOffsetPx = levelOffsetPx + config.containedOffset;
+    const containedOffsetPercent = (containedOffsetPx / availableWidth) * 100;
+    const baseOffsetPercent = (levelOffsetPx / availableWidth) * 100;
+
+    return [
+      {
+        event: longest,
+        widthPercentage: 100 - baseOffsetPercent,
+        xOffsetPercentage: baseOffsetPercent,
+        zIndex: level + 1,
+        layoutType: 'contained',
+      },
+      ...others.map((e, i) => ({
+        event: e,
+        widthPercentage: 100 - containedOffsetPercent,
+        xOffsetPercentage: containedOffsetPercent,
+        zIndex: level + 2 + i,
+        layoutType: 'contained' as const,
+      })),
+    ];
+  }
+
+  const levelOffsetPercent = (levelOffsetPx / availableWidth) * 100;
+  const availableWidthAfterOffset = availableWidth - levelOffsetPx;
+  const totalGapWidth = (events.length - 1) * config.sideBySideGap;
+  const widthPerEvent =
+    ((availableWidthAfterOffset - totalGapWidth) / events.length / availableWidth) * 100;
+  const gapPercent = (config.sideBySideGap / availableWidth) * 100;
+
+  return sorted.map((e, i) => ({
+    event: e,
+    widthPercentage: widthPerEvent,
+    xOffsetPercentage: levelOffsetPercent + i * (widthPerEvent + gapPercent),
+    zIndex: level + 1,
+    layoutType: 'side-by-side' as const,
+  }));
+};
+
+const computeEnhancedOverlapLayout = (
+  events: EventItemInternal[],
+  config: EnhancedOverlapConfig,
+  availableWidth: number,
+  resourceIndex?: number
+): PackedEvent[] => {
+  if (events.length === 0) {
+    return [];
+  }
+
+  const collisionCache = new Map<string, boolean>();
+
+  const stackLevels = assignStackLevels(
+    events,
+    config.minStartDifferenceForStack,
+    collisionCache
+  );
+
+  const levelGroups = new Map<number, EventItemInternal[]>();
+  for (const [event, level] of stackLevels.entries()) {
+    if (!levelGroups.has(level)) {
+      levelGroups.set(level, []);
+    }
+    levelGroups.get(level)!.push(event);
+  }
+
+  const maxStackOffsetPx =
+    (availableWidth * config.maxStackOffsetPercentage) / 100;
+  const allLayoutResults: LayoutResult[] = [];
+
+  for (const [level, levelEvents] of levelGroups.entries()) {
+    const offsetPx = Math.min(level * config.stackOffset, maxStackOffsetPx);
+
+    const overlappingGroups = groupOverlappingEvents(levelEvents, collisionCache);
+
+    for (const group of overlappingGroups) {
+      const results = layoutEventsInLevel(
+        group,
+        level,
+        offsetPx,
+        availableWidth,
+        config
+      );
+      allLayoutResults.push(...results);
+    }
+  }
+
+  // Post-process to check for contained relationships across levels
+  const resultMap = new Map(allLayoutResults.map(r => [r.event.localId, r]));
+
+  for (const result of allLayoutResults) {
+    if (result.layoutType === 'stacked') {
+      // Check if this event is contained within another event
+      for (const otherResult of allLayoutResults) {
+        if (result.event.localId !== otherResult.event.localId) {
+          const thisEvent = result.event;
+          const otherEvent = otherResult.event;
+
+          // Check if this event is fully contained
+          const isFullyContained =
+            thisEvent._internal.startUnix >= otherEvent._internal.startUnix &&
+            thisEvent._internal.endUnix <= otherEvent._internal.endUnix;
+
+          if (isFullyContained) {
+            const startDiff =
+              Math.abs(thisEvent._internal.startUnix - otherEvent._internal.startUnix) /
+              MILLISECONDS_IN_MINUTE;
+            const durationDiff = Math.abs(otherEvent._internal.duration - thisEvent._internal.duration);
+
+            // If start diff >= threshold AND duration diff > threshold → contained
+            if (startDiff >= config.minStartDifferenceForStack &&
+                durationDiff > config.durationDiffThreshold) {
+              result.layoutType = 'contained';
+
+              // Recalculate offset using containedOffset instead of stackOffset
+              const level = stackLevels.get(result.event) ?? 0;
+              const containerLevel = stackLevels.get(otherResult.event) ?? 0;
+
+              // Calculate offset: use containedOffset for levels beyond container
+              const levelsAboveContainer = level - containerLevel;
+              const newOffsetPx = Math.min(
+                containerLevel * config.stackOffset + levelsAboveContainer * config.containedOffset,
+                maxStackOffsetPx
+              );
+              const newOffsetPercent = (newOffsetPx / availableWidth) * 100;
+
+              result.xOffsetPercentage = newOffsetPercent;
+              result.widthPercentage = 100 - newOffsetPercent;
+
+              // Also mark the container event as contained
+              const containerResult = resultMap.get(otherEvent.localId);
+              if (containerResult && containerResult.layoutType === 'stacked') {
+                containerResult.layoutType = 'contained';
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return allLayoutResults.map((result) => {
+    const stackLevel = stackLevels.get(result.event) ?? 0;
+    return {
+      ...result.event,
+      _internal: {
+        ...result.event._internal,
+        resourceIndex,
+        widthPercentage: result.widthPercentage,
+        xOffsetPercentage: result.xOffsetPercentage,
+        zIndex: result.zIndex,
+        stackLevel,
+        layoutType: result.layoutType,
+      },
+    };
+  });
+};
+
 export const populateEvents = (
   events: EventItemInternal[],
   {
     overlap = false,
     minStartDifference = DEFAULT_MIN_START_DIFFERENCE,
     resources,
+    overlappingConfig,
+    availableWidth,
   }: {
     overlap?: boolean;
     minStartDifference?: number;
     resources?: ResourceItem[];
+    overlappingConfig?: {
+      minStartDifferenceForStack?: number;
+      durationDiffThreshold?: number;
+      stackOffset?: number;
+      containedOffset?: number;
+      maxStackOffsetPercentage?: number;
+      sideBySideGap?: number;
+    };
+    availableWidth?: number;
   } = {}
 ): PackedEvent[] => {
   if (!events.length) {
     return [];
   }
 
+  const useEnhancedLayout = overlappingConfig !== undefined;
+
   const handleEvents = (
     eventsToHandle: EventItemInternal[],
     resourceIndex?: number
-  ): PackedEvent[] =>
-    overlap
+  ): PackedEvent[] => {
+    if (useEnhancedLayout && availableWidth) {
+      const config: EnhancedOverlapConfig = {
+        minStartDifferenceForStack:
+          overlappingConfig.minStartDifferenceForStack ??
+          minStartDifference ??
+          DEFAULT_MIN_START_DIFFERENCE,
+        durationDiffThreshold: overlappingConfig.durationDiffThreshold ?? 30,
+        stackOffset: overlappingConfig.stackOffset ?? 10,
+        containedOffset: overlappingConfig.containedOffset ?? 10,
+        maxStackOffsetPercentage: overlappingConfig.maxStackOffsetPercentage ?? 40,
+        sideBySideGap: overlappingConfig.sideBySideGap ?? 1,
+      };
+      return computeEnhancedOverlapLayout(
+        eventsToHandle,
+        config,
+        availableWidth,
+        resourceIndex
+      );
+    }
+
+    return overlap
       ? handleOverlap(
           eventsToHandle,
           minStartDifference * MILLISECONDS_IN_MINUTE,
           resourceIndex
         )
       : handleNoOverlap(eventsToHandle, resourceIndex);
+  };
 
   if (resources && resources.length > 0) {
-    return resources.flatMap((resource, resourceIndex) => {
-      const resourceEvents = events.filter((e) => e.resourceId === resource.id);
-      return resourceEvents.length > 0
-        ? handleEvents(resourceEvents, resourceIndex)
-        : [];
-    });
+    const eventsByResourceId = new Map<string, EventItemInternal[]>();
+    for (const event of events) {
+      const resourceId = event.resourceId || '';
+      if (!eventsByResourceId.has(resourceId)) {
+        eventsByResourceId.set(resourceId, []);
+      }
+      eventsByResourceId.get(resourceId)!.push(event);
+    }
+
+    const result: PackedEvent[] = [];
+    for (let i = 0; i < resources.length; i++) {
+      const resource = resources[i];
+      const resourceEvents = eventsByResourceId.get(resource.id);
+      if (resourceEvents && resourceEvents.length > 0) {
+        result.push(...handleEvents(resourceEvents, i));
+      }
+    }
+    return result;
   }
 
   return handleEvents(events);

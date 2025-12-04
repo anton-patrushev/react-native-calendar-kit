@@ -44,6 +44,8 @@ const EventItem: FC<EventItemProps> = ({
       return {
         eventContainerStyle: state.eventContainerStyle,
         eventTitleStyle: state.eventTitleStyle,
+        overlapEventBorderColor: state.overlapEventBorderColor,
+        overlapEventBorderWidth: state.overlapEventBorderWidth,
       };
     }, [])
   );
@@ -70,6 +72,8 @@ const EventItem: FC<EventItemProps> = ({
     widthPercentage,
     xOffsetPercentage,
     resourceIndex,
+    zIndex,
+    stackLevel,
   } = _internal;
 
   const data = useMemo(() => {
@@ -234,15 +238,48 @@ const EventItem: FC<EventItemProps> = ({
 
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
 
+  // Compute overlap border style
+  const overlapBorderStyle = useMemo(() => {
+    // Show border only for stacked events (stackLevel > 0)
+    const isStacked = (stackLevel ?? 0) > 0;
+    if (!isStacked) {
+      return undefined;
+    }
+
+    const borderColor =
+      theme.overlapEventBorderColor === null
+        ? undefined
+        : theme.overlapEventBorderColor ?? '#FFF';
+
+    const borderWidth =
+      theme.overlapEventBorderWidth !== undefined
+        ? theme.overlapEventBorderWidth
+        : 1;
+
+    if (borderColor === undefined || borderWidth === 0) {
+      return undefined;
+    }
+
+    return {
+      borderWidth,
+      borderColor,
+    };
+  }, [
+    stackLevel,
+    theme.overlapEventBorderColor,
+    theme.overlapEventBorderWidth,
+  ]);
+
   return (
     <View
       style={[
         styles.container,
         {
           width: eventWidth,
-          left: eventPosX + 1,
+          left: eventPosX,
           height: `${((data.totalDuration - 1) / timeRange) * 100}%`,
           top: `${((data.startMinutes + 1) / timeRange) * 100}%`,
+          zIndex,
         },
       ]}>
       <Pressable
@@ -256,9 +293,9 @@ const EventItem: FC<EventItemProps> = ({
         <View
           style={[
             styles.contentContainer,
-            !!xOffsetPercentage && styles.overlapEvent,
             { backgroundColor: event.color },
             theme.eventContainerStyle,
+            overlapBorderStyle,
             { opacity },
           ]}>
           {renderEvent ? (
@@ -303,5 +340,4 @@ const styles = StyleSheet.create({
     height: '100%',
     overflow: 'hidden',
   },
-  overlapEvent: { borderWidth: 1, borderColor: '#FFF' },
 });
