@@ -153,7 +153,7 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
       return itemWidth;
     }, [snapToOffsets, isDualAxisMode, itemWidth, pagingEnabled]);
 
-    const effectiveDrawDistance = drawDistance ?? width * 2;
+    const effectiveDrawDistance = drawDistance ?? width * 3;
 
     const overlayElement = useMemo(() => {
       if (!renderOverlay) {
