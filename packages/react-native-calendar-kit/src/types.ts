@@ -808,6 +808,17 @@ export interface CalendarHeaderProps {
   eventInitialMinutes?: number;
 
   insetBottom?: number;
+
+  /**
+   * Enable/disable horizontal scrolling for the day-bar (header) list.
+   *
+   * When `false`, the header won't be scrollable by the user and won't
+   * participate as the active scroll source (prevents it from becoming active
+   * for linked scrolling). It can still be kept in sync by the body/grid.
+   *
+   * - Default: `true` (uses the global `allowHorizontalSwipe` behavior)
+   */
+  dayBarScrollEnabled?: boolean;
 }
 
 export interface CalendarBodyProps {

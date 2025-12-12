@@ -120,7 +120,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   const onScrollBeginDrag = useCallback(
     (event: any) => {
       linkedOnScrollBeginDrag?.(event);
-      scrollProps.onScrollBeginDrag?.(event);
+      scrollProps.onScrollBeginDrag?.();
     },
     [linkedOnScrollBeginDrag, scrollProps]
   );
@@ -128,7 +128,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   const onMomentumScrollBegin = useCallback(
     (event: any) => {
       linkedOnMomentumScrollBegin?.(event);
-      scrollProps.onMomentumScrollBegin?.(event);
+      scrollProps.onMomentumScrollBegin?.();
     },
     [linkedOnMomentumScrollBegin, scrollProps]
   );
