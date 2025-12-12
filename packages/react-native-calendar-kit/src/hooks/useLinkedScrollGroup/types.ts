@@ -1,4 +1,5 @@
 import type { GestureResponderEvent } from 'react-native';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import type Animated from 'react-native-reanimated';
 import type {
   AnimatedRef,
@@ -20,6 +21,14 @@ export type EventHandlerInternal<Event extends object> = {
 };
 export type ScrollController = {
   onTouchStart?: (event: GestureResponderEvent) => void;
+  onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollEndDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onMomentumScrollBegin?: (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => void;
+  onMomentumScrollEnd?: (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => void;
   onWheel?: (event: WheelEvent) => void;
 };
 

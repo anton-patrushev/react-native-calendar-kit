@@ -73,10 +73,12 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     linkedScrollGroup,
     dateResourceItems,
   } = useCalendar();
-  const { onTouchStart, onWheel } = linkedScrollGroup.addAndGet(
-    ScrollType.dayBar,
-    dayBarListRef
-  );
+  const {
+    onTouchStart,
+    onWheel,
+    onScrollBeginDrag: linkedOnScrollBeginDrag,
+    onMomentumScrollBegin: linkedOnMomentumScrollBegin,
+  } = linkedScrollGroup.addAndGet(ScrollType.dayBar, dayBarListRef);
   const resources = useResources();
 
   const headerStyles = useTheme(
@@ -94,6 +96,21 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
   const scrollProps = useSyncedList({
     id: ScrollType.dayBar,
   });
+  const onScrollBeginDrag = useCallback(
+    (event: any) => {
+      linkedOnScrollBeginDrag?.(event);
+      scrollProps.onScrollBeginDrag?.(event);
+    },
+    [linkedOnScrollBeginDrag, scrollProps]
+  );
+
+  const onMomentumScrollBegin = useCallback(
+    (event: any) => {
+      linkedOnMomentumScrollBegin?.(event);
+      scrollProps.onMomentumScrollBegin?.(event);
+    },
+    [linkedOnMomentumScrollBegin, scrollProps]
+  );
 
   const isExpanded = useSharedValue(false);
   const eventHeight = useDerivedValue(
@@ -398,6 +415,8 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
                   renderItem={_renderResourceHeaderItem}
                   pagingEnabled={resourcePagingEnabled}
                   scrollEnabled={allowHorizontalSwipe}
+                  onScrollBeginDrag={onScrollBeginDrag}
+                  onMomentumScrollBegin={onMomentumScrollBegin}
                   onTouchStart={onTouchStart}
                   onWheel={onWheel}
                   initialOffset={initialOffset}
@@ -416,6 +435,8 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
                   extraScrollData={extraScrollData}
                   scrollEnabled={allowHorizontalSwipe}
                   {...scrollProps}
+                  onScrollBeginDrag={onScrollBeginDrag}
+                  onMomentumScrollBegin={onMomentumScrollBegin}
                   onTouchStart={onTouchStart}
                   onWheel={onWheel}
                 />

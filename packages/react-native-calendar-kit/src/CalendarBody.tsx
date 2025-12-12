@@ -104,10 +104,12 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     daySnapOffsets,
     handleResourceScrollOffsetChange,
   } = useCalendar();
-  const { onTouchStart, onWheel } = linkedScrollGroup.addAndGet(
-    ScrollType.calendarGrid,
-    gridListRef
-  );
+  const {
+    onTouchStart,
+    onWheel,
+    onScrollBeginDrag: linkedOnScrollBeginDrag,
+    onMomentumScrollBegin: linkedOnMomentumScrollBegin,
+  } = linkedScrollGroup.addAndGet(ScrollType.calendarGrid, gridListRef);
 
   const locale = useLocale();
   const { onRefresh, onLoad } = useActions();
@@ -115,6 +117,21 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   const scrollProps = useSyncedList({
     id: ScrollType.calendarGrid,
   });
+  const onScrollBeginDrag = useCallback(
+    (event: any) => {
+      linkedOnScrollBeginDrag?.(event);
+      scrollProps.onScrollBeginDrag?.(event);
+    },
+    [linkedOnScrollBeginDrag, scrollProps]
+  );
+
+  const onMomentumScrollBegin = useCallback(
+    (event: any) => {
+      linkedOnMomentumScrollBegin?.(event);
+      scrollProps.onMomentumScrollBegin?.(event);
+    },
+    [linkedOnMomentumScrollBegin, scrollProps]
+  );
 
   const animContentStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value,
@@ -373,6 +390,8 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                       pagingEnabled={resourcePagingEnabled}
                       renderOverlay={_renderResourceOverlay}
                       scrollEnabled={allowHorizontalSwipe}
+                      onScrollBeginDrag={onScrollBeginDrag}
+                      onMomentumScrollBegin={onMomentumScrollBegin}
                       onTouchStart={onTouchStart}
                       onWheel={onWheel}
                       snapToOffsets={daySnapOffsets}
@@ -396,6 +415,8 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                       renderAheadItem={pagesPerSide}
                       extraScrollData={extraScrollData}
                       {...scrollProps}
+                      onScrollBeginDrag={onScrollBeginDrag}
+                      onMomentumScrollBegin={onMomentumScrollBegin}
                       onLoad={onLoad}
                       onTouchStart={onTouchStart}
                       onWheel={onWheel}
