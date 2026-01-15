@@ -409,6 +409,35 @@ const Calendar = () => {
     router.setParams({ viewMode: 'day', numberOfDays: '1' });
   };
 
+  const onDragEventPending = useCallback(
+    (event: any, actions: { confirm: () => void; cancel: () => void }) => {
+      console.log('onDragEventPending', event);
+
+      // Show confirmation alert
+      Alert.alert(
+        'Confirm Event Move',
+        `Move "${event.title || 'Event'}" to new time?`,
+        [
+          {
+            text: 'Cancel',
+            onPress: () => {
+              actions.cancel();
+            },
+            style: 'cancel',
+          },
+          {
+            text: 'Confirm',
+            onPress: () => {
+              actions.confirm();
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+    },
+    []
+  );
+
   const _onPressToday = useCallback(() => {
     calendarRef.current?.goToDate({
       date: new Date().toISOString(),
@@ -629,6 +658,7 @@ const Calendar = () => {
         scrollToNow
         useHaptic
         allowDragToEdit
+        requireDragConfirmation={['edit']}
         allowDragToCreate
         useAllDayEvent
         rightEdgeSpacing={4}
@@ -646,6 +676,7 @@ const Calendar = () => {
         end={23 * 60}
         spaceFromBottom={safeBottom}
         defaultDuration={60}
+        onDragEventPending={onDragEventPending}
         onDragEventEnd={async (event) => {
           console.log('onDragEventEnd', event);
 
@@ -731,6 +762,7 @@ const Calendar = () => {
               ? undefined
               : _renderDraggingEvent
           }
+          // renderEvent={renderEvent}
         />
       </CalendarContainer>
     </View>
