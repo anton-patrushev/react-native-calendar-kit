@@ -28,7 +28,9 @@ import {
 import ActionsProvider from './context/ActionsProvider';
 import type { CalendarContextProps } from './context/CalendarProvider';
 import CalendarProvider from './context/CalendarProvider';
-import DragEventProvider from './context/DragEventProvider';
+import DragEventProvider, {
+  useDragEventActions,
+} from './context/DragEventProvider';
 import type { EventsRef } from './context/EventsProvider';
 import EventsProvider from './context/EventsProvider';
 import HighlightDatesProvider from './context/HighlightDatesProvider';
@@ -66,6 +68,25 @@ import {
   findNearestNumber,
   prepareCalendarRange,
 } from './utils/utils';
+
+// Helper component to expose drag actions to parent
+const DragActionsExporter: React.FC<{
+  dragActionsRef: React.MutableRefObject<{
+    confirmDrag: () => void;
+    cancelDrag: () => void;
+  } | null>;
+}> = ({ dragActionsRef }) => {
+  const { confirmDrag, cancelDrag } = useDragEventActions();
+
+  useEffect(() => {
+    dragActionsRef.current = { confirmDrag, cancelDrag };
+    return () => {
+      dragActionsRef.current = null;
+    };
+  }, [confirmDrag, cancelDrag, dragActionsRef]);
+
+  return null;
+};
 
 const CalendarContainer: React.ForwardRefRenderFunction<
   CalendarKitHandle,
@@ -136,6 +157,10 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     resourcePerPage = 3,
     resourcePagingEnabled = false,
     overlappingConfig,
+    requireDragConfirmation = false,
+    onDragEventPending,
+    onDragSelectedEventPending,
+    onDragCreateEventPending,
   },
   ref
 ) => {
@@ -243,6 +268,10 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   const verticalListRef = useAnimatedRef<Animated.ScrollView>();
   const dayBarListRef = useAnimatedRef<Animated.ScrollView>();
   const gridListRef = useAnimatedRef<Animated.ScrollView>();
+  const dragActionsRef = useRef<{
+    confirmDrag: () => void;
+    cancelDrag: () => void;
+  } | null>(null);
   const scrollVisibleHeight = useRef(0);
   const triggerDateChanged = useRef<number | undefined>(undefined);
   const visibleDateRef = useRef<VisibleDateProviderRef>(null);
@@ -751,6 +780,18 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     }
   );
 
+  const confirmDrag = useLatestCallback(() => {
+    if (dragActionsRef.current?.confirmDrag) {
+      dragActionsRef.current.confirmDrag();
+    }
+  });
+
+  const cancelDrag = useLatestCallback(() => {
+    if (dragActionsRef.current?.cancelDrag) {
+      dragActionsRef.current.cancelDrag();
+    }
+  });
+
   const calendarMethods = useMemo(
     () => ({
       goToDate,
@@ -767,6 +808,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       goToResource,
       goToNextResource,
       goToPrevResource,
+      confirmDrag,
+      cancelDrag,
     }),
     [
       getDateStringByOffset,
@@ -783,6 +826,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       goToResource,
       goToNextResource,
       goToPrevResource,
+      confirmDrag,
+      cancelDrag,
     ]
   );
 
@@ -1043,6 +1088,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     onDragSelectedEventEnd,
     onDragCreateEventStart,
     onDragCreateEventEnd,
+    onDragEventPending,
+    onDragSelectedEventPending,
+    onDragCreateEventPending,
     onLoad: _onLoad,
     onLongPressBackground,
   };
@@ -1086,7 +1134,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
                             allowDragToCreate={allowDragToCreate}
                             defaultDuration={defaultDuration}
                             resources={resources}
-                            hapticService={hapticService}>
+                            hapticService={hapticService}
+                            requireDragConfirmation={requireDragConfirmation}>
+                            <DragActionsExporter dragActionsRef={dragActionsRef} />
                             {children}
                           </DragEventProvider>
                         </EventsProvider>
