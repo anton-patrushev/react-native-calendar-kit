@@ -161,6 +161,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     onDragEventPending,
     onDragSelectedEventPending,
     onDragCreateEventPending,
+    allowDragToOtherResources = true,
   },
   ref
 ) => {
@@ -1135,7 +1136,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
                             defaultDuration={defaultDuration}
                             resources={resources}
                             hapticService={hapticService}
-                            requireDragConfirmation={requireDragConfirmation}>
+                            requireDragConfirmation={requireDragConfirmation}
+                            allowDragToOtherResources={allowDragToOtherResources}>
                             <DragActionsExporter dragActionsRef={dragActionsRef} />
                             {children}
                           </DragEventProvider>
