@@ -29,6 +29,8 @@ const useDragEventGesture = () => {
     initialDragState,
     isDraggingCreateAnim,
     dragX,
+    allowDragToOtherResources,
+    resourceDragBounds,
   } = useDragEvent();
   const initialX = useSharedValue(0);
 
@@ -158,7 +160,14 @@ const useDragEventGesture = () => {
     })
     .onUpdate(({ translationX, translationY, x, y }) => {
       dragPosition.value = { x, y, translationX, translationY };
-      dragX.value = x;
+
+      // Clamp dragX to resource bounds when locked to resource
+      const bounds = resourceDragBounds.value;
+      if (!allowDragToOtherResources && bounds.minX !== -1) {
+        dragX.value = clampValues(x, bounds.minX, bounds.maxX);
+      } else {
+        dragX.value = x;
+      }
       const {
         dragStart: initialStart,
         dragStartUnix: initialDayUnix,
