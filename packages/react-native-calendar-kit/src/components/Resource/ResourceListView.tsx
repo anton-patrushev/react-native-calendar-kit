@@ -19,6 +19,14 @@ export interface ResourceListViewProps {
   width: number;
   height: number;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollEndDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onMomentumScrollBegin?: (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => void;
+  onMomentumScrollEnd?: (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => void;
   resources?: ResourceItem[];
   items?: DateResourceItem[];
   resourcePerPage: number;
@@ -51,6 +59,10 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
       width,
       height,
       onScroll,
+      onScrollBeginDrag,
+      onScrollEndDrag,
+      onMomentumScrollBegin,
+      onMomentumScrollEnd,
       resources,
       items,
       resourcePerPage,
@@ -185,6 +197,10 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
           itemSize={itemSize}
           drawDistance={effectiveDrawDistance}
           onScroll={onScroll}
+          onScrollBeginDrag={onScrollBeginDrag}
+          onScrollEndDrag={onScrollEndDrag}
+          onMomentumScrollBegin={onMomentumScrollBegin}
+          onMomentumScrollEnd={onMomentumScrollEnd}
           style={{ height }}
           initialOffset={initialOffset}
           pagingEnabled={isDualAxisMode ? false : pagingEnabled}

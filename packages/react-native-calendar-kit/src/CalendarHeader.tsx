@@ -44,6 +44,7 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
   eventInitialMinutes = DEFAULT_ALL_DAY_MINUTES,
   renderDayItem,
   insetBottom = 100,
+  dayBarScrollEnabled,
 }) => {
   const {
     calendarLayout,
@@ -73,10 +74,15 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     linkedScrollGroup,
     dateResourceItems,
   } = useCalendar();
-  const { onTouchStart, onWheel } = linkedScrollGroup.addAndGet(
-    ScrollType.dayBar,
-    dayBarListRef
-  );
+
+  const effectiveDayBarScrollEnabled =
+    dayBarScrollEnabled ?? allowHorizontalSwipe;
+  const {
+    onTouchStart,
+    onWheel,
+    onScrollBeginDrag: linkedOnScrollBeginDrag,
+    onMomentumScrollBegin: linkedOnMomentumScrollBegin,
+  } = linkedScrollGroup.addAndGet(ScrollType.dayBar, dayBarListRef);
   const resources = useResources();
 
   const headerStyles = useTheme(
@@ -94,6 +100,21 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
   const scrollProps = useSyncedList({
     id: ScrollType.dayBar,
   });
+  const onScrollBeginDrag = useCallback(
+    (event: any) => {
+      linkedOnScrollBeginDrag?.(event);
+      scrollProps.onScrollBeginDrag?.();
+    },
+    [linkedOnScrollBeginDrag, scrollProps]
+  );
+
+  const onMomentumScrollBegin = useCallback(
+    (event: any) => {
+      linkedOnMomentumScrollBegin?.(event);
+      scrollProps.onMomentumScrollBegin?.();
+    },
+    [linkedOnMomentumScrollBegin, scrollProps]
+  );
 
   const isExpanded = useSharedValue(false);
   const eventHeight = useDerivedValue(
@@ -397,9 +418,13 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
                   resourcePerPage={resourcePerPage}
                   renderItem={_renderResourceHeaderItem}
                   pagingEnabled={resourcePagingEnabled}
-                  scrollEnabled={allowHorizontalSwipe}
-                  onTouchStart={onTouchStart}
-                  onWheel={onWheel}
+                  scrollEnabled={effectiveDayBarScrollEnabled}
+                  onScrollBeginDrag={onScrollBeginDrag}
+                  onMomentumScrollBegin={onMomentumScrollBegin}
+                  onTouchStart={
+                    effectiveDayBarScrollEnabled ? onTouchStart : undefined
+                  }
+                  onWheel={effectiveDayBarScrollEnabled ? onWheel : undefined}
                   initialOffset={initialOffset}
                 />
               ) : (
@@ -414,10 +439,14 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
                   initialOffset={initialOffset}
                   columnsPerPage={columns}
                   extraScrollData={extraScrollData}
-                  scrollEnabled={allowHorizontalSwipe}
+                  scrollEnabled={effectiveDayBarScrollEnabled}
                   {...scrollProps}
-                  onTouchStart={onTouchStart}
-                  onWheel={onWheel}
+                  onScrollBeginDrag={onScrollBeginDrag}
+                  onMomentumScrollBegin={onMomentumScrollBegin}
+                  onTouchStart={
+                    effectiveDayBarScrollEnabled ? onTouchStart : undefined
+                  }
+                  onWheel={effectiveDayBarScrollEnabled ? onWheel : undefined}
                 />
               )}
             </Animated.View>
