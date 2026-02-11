@@ -53,6 +53,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   renderDraggingHour,
   NowIndicatorComponent,
   renderCustomHorizontalLine,
+  showDraggingEndTime = true,
 }) => {
   const {
     calendarLayout,
@@ -435,7 +436,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                     renderDraggingEvent={renderDraggingEvent}
                     resources={resources}
                   />
-                  <DraggingHour renderHour={renderDraggingHour} />
+                  <DraggingHour renderHour={renderDraggingHour} showEndTime={showDraggingEndTime} />
                 </View>
               </View>
             </Animated.View>

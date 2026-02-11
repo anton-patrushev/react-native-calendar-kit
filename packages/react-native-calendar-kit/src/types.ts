@@ -698,6 +698,14 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * Default: `true`
    */
   allowDragToOtherResources?: boolean;
+
+  /**
+   * Show end time label when dragging events.
+   * When set to `false`, only the start time label is shown during drag operations.
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
 }
 
 export interface ResourceItem extends Record<string, any> {
@@ -964,6 +972,14 @@ export interface CalendarBodyProps {
 
   /** Custom now indicator */
   NowIndicatorComponent?: React.ReactElement | null;
+
+  /**
+   * Show end time label when dragging events.
+   * When set to `false`, only the start time label is shown during drag operations.
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
 }
 
 export interface RenderHourProps {

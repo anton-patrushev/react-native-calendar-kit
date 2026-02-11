@@ -40,6 +40,7 @@ const CalendarKit: React.ForwardRefRenderFunction<
     eventInitialMinutes,
     eventMinMinutes,
     renderCustomHorizontalLine,
+    showDraggingEndTime,
     ...rest
   } = props;
 
@@ -70,6 +71,7 @@ const CalendarKit: React.ForwardRefRenderFunction<
     renderDraggingEvent,
     NowIndicatorComponent,
     renderCustomHorizontalLine,
+    showDraggingEndTime,
   };
 
   return (
