@@ -416,11 +416,12 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
     if (props?.hourScroll) {
       const minutes = date.hour * 60 + date.minute;
-      const position = minutes * minuteHeight.value - startOffset.value;
       const scrollOffset = scrollVisibleHeight.current / 2;
       const animatedHour =
         props?.animatedHour !== undefined ? props.animatedHour : true;
       runOnUI(() => {
+        'worklet';
+        const position = minutes * minuteHeight.value - startOffset.value;
         scrollTo(verticalListRef, 0, position - scrollOffset, animatedHour);
       })();
     }
@@ -432,8 +433,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       if (timeInMinutes < start || timeInMinutes > end) {
         return;
       }
-      const position = (timeInMinutes - start) * minuteHeight.value;
       runOnUI(() => {
+        'worklet';
+        const position = (timeInMinutes - start) * minuteHeight.value;
         scrollTo(verticalListRef, 0, position, animated);
       })();
     }
