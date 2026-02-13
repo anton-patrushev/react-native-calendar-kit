@@ -286,37 +286,38 @@ const EventItem: FC<EventItemProps> = ({
         },
       ]}>
       <Pressable
-        style={(state) => [
-          StyleSheet.absoluteFill,
-          { opacity: state.pressed ? 0.6 : 1 },
-        ]}
+        style={StyleSheet.absoluteFill}
         disabled={!onPressEvent && !onLongPressEvent}
         onPress={onPressEvent ? _onPressEvent : undefined}
         onLongPress={onLongPressEvent ? _onLongPressEvent : undefined}>
-        <View
-          style={[
-            styles.contentContainer,
-            { backgroundColor: event.color },
-            theme.eventContainerStyle,
-            overlapBorderStyle,
-            { opacity },
-          ]}>
-          {renderEvent ? (
-            renderEvent(eventInput, {
-              width: eventWidthAnim,
-              height: eventHeight,
-            })
-          ) : (
-            <Text
-              style={[
-                styles.title,
-                theme.eventTitleStyle,
-                { color: event.titleColor },
-              ]}>
-              {event.title}
-            </Text>
-          )}
-        </View>
+        {({ pressed }) => (
+          <View
+            style={[
+              styles.contentContainer,
+              { backgroundColor: event.color },
+              theme.eventContainerStyle,
+              overlapBorderStyle,
+              { opacity },
+            ]}>
+            {renderEvent ? (
+              renderEvent(eventInput, {
+                width: eventWidthAnim,
+                height: eventHeight,
+              })
+            ) : (
+              <Text
+                style={[
+                  styles.title,
+                  theme.eventTitleStyle,
+                  { color: event.titleColor },
+                ]}>
+                {event.title}
+              </Text>
+            )}
+            {/* Dark overlay for pressed state - darkens card without transparency */}
+            {pressed && <View style={styles.pressedOverlay} />}
+          </View>
+        )}
       </Pressable>
     </View>
   );
@@ -342,5 +343,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     overflow: 'hidden',
+  },
+  pressedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 2,
   },
 });
