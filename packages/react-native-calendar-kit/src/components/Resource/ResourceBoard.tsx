@@ -37,6 +37,7 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
     resourcePerPage,
     spaceFromBottom,
     timelineHeight,
+    showQuarterHourLines,
   } = useBody();
   const { timeZone } = useTimezone();
   const { onPressBackground, onLongPressBackground } = useActions();
@@ -114,6 +115,7 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
   const _renderHorizontalLines = useMemo(() => {
     const rows: React.ReactNode[] = [];
     for (let i = 0; i < totalSlots; i++) {
+      // Full hour line (:00)
       rows.push(
         <HorizontalLine
           key={i}
@@ -124,6 +126,20 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
         />
       );
 
+      // Quarter hour line (:15) - only when showQuarterHourLines is enabled
+      if (showQuarterHourLines) {
+        rows.push(
+          <HorizontalLine
+            key={`${i}.25`}
+            borderColor={colors.border}
+            index={i + 0.25}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
+
+      // Half hour line (:30)
       rows.push(
         <HorizontalLine
           key={`${i}.5`}
@@ -133,6 +149,19 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
           renderCustomHorizontalLine={renderCustomHorizontalLine}
         />
       );
+
+      // Three-quarter hour line (:45) - only when showQuarterHourLines is enabled
+      if (showQuarterHourLines) {
+        rows.push(
+          <HorizontalLine
+            key={`${i}.75`}
+            borderColor={colors.border}
+            index={i + 0.75}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
     }
 
     rows.push(
@@ -145,7 +174,7 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
       />
     );
     return rows;
-  }, [totalSlots, colors.border, renderCustomHorizontalLine]);
+  }, [totalSlots, colors.border, renderCustomHorizontalLine, showQuarterHourLines]);
 
   return (
     <View style={styles.container}>

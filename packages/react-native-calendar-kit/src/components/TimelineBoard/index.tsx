@@ -48,6 +48,7 @@ const TimelineBoard = ({
     renderCustomHorizontalLine,
     spaceFromBottom,
     calendarLayout,
+    showQuarterHourLines,
   } = useBody();
   const { timeZone } = useTimezone();
   const colors = useTheme((state) => state.colors);
@@ -75,6 +76,7 @@ const TimelineBoard = ({
   const _renderHorizontalLines = useMemo(() => {
     const rows: React.ReactNode[] = [];
     for (let i = 0; i < totalSlots; i++) {
+      // Full hour line (:00)
       rows.push(
         <HorizontalLine
           key={i}
@@ -85,6 +87,20 @@ const TimelineBoard = ({
         />
       );
 
+      // Quarter hour line (:15) - only when showQuarterHourLines is enabled
+      if (showQuarterHourLines) {
+        rows.push(
+          <HorizontalLine
+            key={`${i}.25`}
+            borderColor={colors.border}
+            index={i + 0.25}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
+
+      // Half hour line (:30)
       rows.push(
         <HorizontalLine
           key={`${i}.5`}
@@ -94,6 +110,19 @@ const TimelineBoard = ({
           renderCustomHorizontalLine={renderCustomHorizontalLine}
         />
       );
+
+      // Three-quarter hour line (:45) - only when showQuarterHourLines is enabled
+      if (showQuarterHourLines) {
+        rows.push(
+          <HorizontalLine
+            key={`${i}.75`}
+            borderColor={colors.border}
+            index={i + 0.75}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
     }
 
     rows.push(
@@ -106,7 +135,7 @@ const TimelineBoard = ({
       />
     );
     return rows;
-  }, [totalSlots, colors.border, renderCustomHorizontalLine]);
+  }, [totalSlots, colors.border, renderCustomHorizontalLine, showQuarterHourLines]);
 
   const onPress = (event: GestureResponderEvent) => {
     const columnIndex = Math.floor(event.nativeEvent.locationX / columnWidth);
