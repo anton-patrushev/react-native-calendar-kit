@@ -713,6 +713,22 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * Default: `true`
    */
   showDraggingEndTime?: boolean;
+
+  /**
+   * Show visual feedback when tapping on an empty time slot.
+   * Displays a selection box at the tapped location that auto-hides after 500ms.
+   *
+   * Default: `false`
+   */
+  showTapFeedback?: boolean;
+
+  /**
+   * Snap interval for tap feedback indicator in minutes.
+   * The tapped time will be rounded down to the nearest interval.
+   *
+   * Default: `15`
+   */
+  tapFeedbackInterval?: number;
 }
 
 export interface ResourceItem extends Record<string, any> {
@@ -995,6 +1011,13 @@ export interface CalendarBodyProps {
    * Default: `true`
    */
   showDraggingEndTime?: boolean;
+
+  /**
+   * Border color for tap feedback indicator.
+   *
+   * Default: `'rgba(0,0,0,0.3)'`
+   */
+  tapFeedbackBorderColor?: string;
 }
 
 export interface RenderHourProps {
