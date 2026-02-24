@@ -5,7 +5,8 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { EXTRA_HEIGHT, MILLISECONDS_IN_DAY } from '../../constants';
 import { useActions } from '../../context/ActionsProvider';
 import { useBody } from '../../context/BodyContext';
-import { useDragEventActions } from '../../context/DragEventProvider';
+import { useDragEvent, useDragEventActions } from '../../context/DragEventProvider';
+import { useTapFeedback } from '../../context/TapFeedbackContext';
 import { useTheme } from '../../context/ThemeProvider';
 import { useTimezone } from '../../context/TimeZoneProvider';
 import {
@@ -54,6 +55,8 @@ const TimelineBoard = ({
   const colors = useTheme((state) => state.colors);
   const { onPressBackground, onLongPressBackground } = useActions();
   const { triggerDragCreateEvent } = useDragEventActions();
+  const { defaultDuration } = useDragEvent();
+  const { showTapFeedback, snapInterval } = useTapFeedback();
 
   const _renderVerticalLines = useMemo(() => {
     const lines: React.ReactNode[] = [];
@@ -155,6 +158,15 @@ const TimelineBoard = ({
         const resourceIdx = Math.floor(event.nativeEvent.locationX / colWidth);
         newProps.resourceId = resources[resourceIdx]?.id;
       }
+
+      const roundedStartMinutes = Math.floor(minutes / snapInterval) * snapInterval;
+      showTapFeedback({
+        startMinutes: roundedStartMinutes,
+        durationMinutes: defaultDuration,
+        dateUnix: dayUnix,
+        resourceId: newProps.resourceId,
+      });
+
       onPressBackground?.(newProps, event);
     }
   };

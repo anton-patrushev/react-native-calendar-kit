@@ -33,6 +33,7 @@ import CalendarProvider from './context/CalendarProvider';
 import DragEventProvider, {
   useDragEventActions,
 } from './context/DragEventProvider';
+import { TapFeedbackProvider } from './context/TapFeedbackContext';
 import type { EventsRef } from './context/EventsProvider';
 import EventsProvider from './context/EventsProvider';
 import HighlightDatesProvider from './context/HighlightDatesProvider';
@@ -165,6 +166,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     onDragSelectedEventPending,
     onDragCreateEventPending,
     allowDragToOtherResources = true,
+    showTapFeedback = false,
+    tapFeedbackInterval,
   },
   ref
 ) => {
@@ -1158,7 +1161,11 @@ const CalendarContainer: React.ForwardRefRenderFunction<
                             requireDragConfirmation={requireDragConfirmation}
                             allowDragToOtherResources={allowDragToOtherResources}>
                             <DragActionsExporter dragActionsRef={dragActionsRef} />
-                            {children}
+                            <TapFeedbackProvider
+                              enabled={showTapFeedback}
+                              snapInterval={tapFeedbackInterval}>
+                              {children}
+                            </TapFeedbackProvider>
                           </DragEventProvider>
                         </EventsProvider>
                       </UnavailableHoursProvider>

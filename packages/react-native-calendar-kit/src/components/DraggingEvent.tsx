@@ -14,7 +14,8 @@ import { useBody } from '../context/BodyContext';
 import { useDragEvent } from '../context/DragEventProvider';
 import { useTheme } from '../context/ThemeProvider';
 import type { ResourceItem, SelectedEventType } from '../types';
-import { clampValues, findNearestNumber } from '../utils/utils';
+import { getDayIndex, getEventWidth } from '../utils/positionUtils';
+import { clampValues } from '../utils/utils';
 import DragDot from './DragDot';
 
 export interface DraggingEventProps {
@@ -30,6 +31,24 @@ export interface DraggingEventProps {
   containerStyle?: ViewStyle;
   resources?: ResourceItem[];
 }
+
+/**
+ * Get resource index by calculating from drag X position.
+ */
+const getResourceIndexByPosition = (
+  dragX: number,
+  hourWidth: number,
+  eventWidth: number,
+  totalResources: number
+): number => {
+  'worklet';
+  if (totalResources === 1) {
+    return 0;
+  }
+  const xWithoutHourWidth = dragX - hourWidth;
+  const columnIndex = Math.floor(xWithoutHourWidth / eventWidth);
+  return clampValues(columnIndex, 0, totalResources - 1);
+};
 
 export const DraggingEvent: FC<DraggingEventProps> = ({
   renderEvent,
@@ -74,59 +93,38 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
 
   const totalResources =
     resources && resources.length > 1 ? resources.length : 1;
-  const getDayIndex = (dayUnix: number) => {
-    'worklet';
-    let currentIndex = calendarData.visibleDatesArray.indexOf(dayUnix);
-    if (currentIndex === -1) {
-      const nearestVisibleUnix = findNearestNumber(
-        calendarData.visibleDatesArray,
-        dayUnix
-      );
-      const nearestVisibleIndex =
-        calendarData.visibleDates[nearestVisibleUnix]?.index;
-      if (nearestVisibleIndex === undefined) {
-        return 0;
-      }
-      currentIndex = nearestVisibleIndex;
-    }
-    let startIndex = calendarData.visibleDatesArray.indexOf(
-      visibleDateUnixAnim.value
-    );
-    if (startIndex === -1) {
-      const nearestVisibleUnix = findNearestNumber(
-        calendarData.visibleDatesArray,
-        dayUnix
-      );
-      const nearestVisibleIndex =
-        calendarData.visibleDates[nearestVisibleUnix]?.index;
-      if (nearestVisibleIndex === undefined) {
-        return 0;
-      }
-      startIndex = nearestVisibleIndex;
-    }
-    return clampValues(currentIndex - startIndex, 0, columns - 1);
-  };
-  const eventWidth =
-    columnWidth / (enableResourceScroll ? resourcePerPage : totalResources);
+
+  const eventWidth = getEventWidth(
+    columnWidth,
+    enableResourceScroll,
+    resourcePerPage,
+    totalResources
+  );
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
 
   const resourceIndex = useDerivedValue(() => {
-    if (totalResources === 1) {
-      return 0;
-    }
-
-    const xWithoutHourWidth = dragX.value - hourWidth;
-    const columnIndex = Math.floor(xWithoutHourWidth / eventWidth);
-    return clampValues(columnIndex, 0, totalResources - 1);
+    return getResourceIndexByPosition(
+      dragX.value,
+      hourWidth,
+      eventWidth,
+      totalResources
+    );
   }, [totalResources, hourWidth]);
 
-  const internalDayIndex = useSharedValue(getDayIndex(dragStartUnix.value));
+  const internalDayIndex = useSharedValue(
+    getDayIndex(dragStartUnix.value, calendarData, visibleDateUnixAnim, columns)
+  );
 
   useAnimatedReaction(
     () => dragStartUnix.value,
     (dayUnix) => {
       if (dayUnix !== -1) {
-        const dayIndex = getDayIndex(dayUnix);
+        const dayIndex = getDayIndex(
+          dayUnix,
+          calendarData,
+          visibleDateUnixAnim,
+          columns
+        );
         // Update immediately without animation to avoid position lag after drag ends
         internalDayIndex.value = dayIndex;
       }
