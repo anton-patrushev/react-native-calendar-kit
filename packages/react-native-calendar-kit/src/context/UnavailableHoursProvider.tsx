@@ -10,7 +10,7 @@ import { useSyncExternalStoreWithSelector } from '../hooks/useSyncExternalStoreW
 import type { Store } from '../storeBuilder';
 import { createStore } from '../storeBuilder';
 import type { UnavailableHourProps } from '../types';
-import { forceUpdateZone, parseDateTime } from '../utils/dateUtils';
+import { parseDateTime } from '../utils/dateUtils';
 import { useDateChangedListener } from './VisibleDateProvider';
 
 type UnavailableHoursStore = {
@@ -104,18 +104,29 @@ const UnavailableHoursProvider: FC<
           : unavailableHours;
 
       const data: Record<string, UnavailableHourProps[]> = {};
-      let startDateTime = parseDateTime(date, { zone: timeZone }).minus({
+
+      // Fix: `date` millis come from prepareCalendarRange which creates them
+      // as midnight in DEVICE timezone (parseDateTime(isoDate) with no zone).
+      // Interpreting those millis directly in business timezone via
+      // parseDateTime(date, { zone: timeZone }) can shift the date by ±1 day
+      // when device and business timezones differ.
+      // Instead, extract the correct ISO date first (in device TZ, matching
+      // what the calendar columns display), then build the range in business TZ.
+      const baseDateIso = parseDateTime(date).toISODate();
+      let startDateTime = parseDateTime(baseDateIso, { zone: timeZone }).minus({
         days: offset * pagesPerSide,
       });
-      const endDateTime = parseDateTime(date, { zone: timeZone }).plus({
+      const endDateTime = parseDateTime(baseDateIso, { zone: timeZone }).plus({
         days: offset * (pagesPerSide + 1),
       });
 
       while (startDateTime <= endDateTime) {
-        const forceDate = forceUpdateZone(startDateTime, timeZone);
-        const dateUnix = forceDate.toMillis();
-        const weekDay = forceDate.weekday;
-        const dateStr = forceDate.toFormat('yyyy-MM-dd');
+        // weekDay and dateStr are now correct in business timezone
+        const weekDay = startDateTime.weekday;
+        const dateStr = startDateTime.toFormat('yyyy-MM-dd');
+
+        // Reconstruct device-TZ midnight millis to match visibleDatesArray keys
+        const dateUnix = parseDateTime(dateStr).toMillis();
 
         const specificDateHours = originalData[dateStr] || [];
         const weekdayHours = originalData[weekDay] || [];
