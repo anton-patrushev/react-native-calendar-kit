@@ -1222,9 +1222,11 @@ const DragEventProvider: FC<
         const totalResources = resources?.length ?? 0;
         const resourceWidth = columnWidth / resourcePerPage;
 
-        // offsetX tracks position across all date-resource items
-        // Calculate which resource column is at the left edge of viewport
-        const firstVisibleItemIndex = Math.floor(offsetX.value / resourceWidth);
+        // Use Math.round instead of Math.floor so that a scroll offset that is
+        // fractionally below the snap target (common on Android, where the final
+        // onScroll event fires just before the snap settles) still resolves to
+        // the correct page index rather than the previous one.
+        const firstVisibleItemIndex = Math.round(offsetX.value / resourceWidth);
 
         // The item index within a day (modulo by total resources per day)
         const firstVisibleResourceInDay =
@@ -1238,6 +1240,12 @@ const DragEventProvider: FC<
         if (resourceVisualIndex < 0) {
           resourceVisualIndex += totalResources;
         }
+
+        // Clamp to the visible page width
+        resourceVisualIndex = Math.min(
+          Math.max(0, resourceVisualIndex),
+          resourcePerPage - 1
+        );
 
         newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
 
