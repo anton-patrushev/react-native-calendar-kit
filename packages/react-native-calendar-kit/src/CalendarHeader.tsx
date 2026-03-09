@@ -462,8 +462,7 @@ export default React.memo(CalendarHeader);
 const styles = StyleSheet.create({
   headerContainer: {
     zIndex: 999,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
+    borderBottomWidth: 0,
   },
   absolute: { position: 'absolute' },
   leftArea: { height: '100%' },
