@@ -13,6 +13,7 @@ const useDragEventGesture = () => {
     calendarData,
     columns,
     enableResourceScroll,
+    zoomScale,
   } = useCalendar();
   const {
     isDraggingAnim,
@@ -58,7 +59,8 @@ const useDragEventGesture = () => {
     initialDuration: number
   ) => {
     'worklet';
-    const diffMinutes = Math.floor(translationY / minuteHeight.value);
+    const scaledMinuteHeight = minuteHeight.value * zoomScale.value;
+    const diffMinutes = Math.floor(translationY / scaledMinuteHeight);
     let nextDuration = initialDuration + extraMinutes.value + diffMinutes;
     const roundedEndTime = roundMinutes(initialStart + nextDuration, dragStep);
     let nextRoundedDuration = roundedEndTime - initialStart;
@@ -79,13 +81,14 @@ const useDragEventGesture = () => {
     initialDuration: number
   ) => {
     'worklet';
+    const scaledMinuteHeight = minuteHeight.value * zoomScale.value;
     const minStart = initialStart + (initialDuration - dragStep);
-    const initialY = (initialStart + extraMinutes.value) * minuteHeight.value;
+    const initialY = (initialStart + extraMinutes.value) * scaledMinuteHeight;
     const newY = initialY + translationY;
-    let newDragStart = Math.floor(newY / minuteHeight.value);
+    let newDragStart = Math.floor(newY / scaledMinuteHeight);
     let roundedDragStart = roundMinutes(newDragStart, dragStep, 'floor');
 
-    const diffMinutes = Math.floor(translationY / minuteHeight.value);
+    const diffMinutes = Math.floor(translationY / scaledMinuteHeight);
     const diffRoundedMinutes = roundedDragStart - newDragStart;
     let nextDuration = initialDuration - extraMinutes.value - diffMinutes;
     let nextRoundedDuration = nextDuration - diffRoundedMinutes;
@@ -108,9 +111,10 @@ const useDragEventGesture = () => {
     initialStart: number
   ) => {
     'worklet';
-    const initialY = (initialStart + extraMinutes.value) * minuteHeight.value;
+    const scaledMinuteHeight = minuteHeight.value * zoomScale.value;
+    const initialY = (initialStart + extraMinutes.value) * scaledMinuteHeight;
     const newY = initialY + translationY;
-    const newDragStart = Math.floor(newY / minuteHeight.value);
+    const newDragStart = Math.floor(newY / scaledMinuteHeight);
     const roundedDragStart = roundMinutes(newDragStart, dragStep, 'floor');
     dragStartMinutes.value = newDragStart;
     roundedDragStartMinutes.value = roundedDragStart;

@@ -7,7 +7,7 @@ import {
   Pressable,
   type GestureResponderEvent,
 } from 'react-native';
-import { useDerivedValue } from 'react-native-reanimated';
+import Animated, { useDerivedValue } from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY } from '../constants';
 import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -60,6 +60,7 @@ const EventItem: FC<EventItemProps> = ({
     resourcePerPage,
     enableResourceScroll,
     zoomScale,
+    counterScaleStyle,
   } = useBody();
   const { _internal, ...event } = eventInput;
   const timeRange = end - start;
@@ -307,14 +308,16 @@ const EventItem: FC<EventItemProps> = ({
                 zoomScale,
               })
             ) : (
-              <Text
-                style={[
-                  styles.title,
-                  theme.eventTitleStyle,
-                  { color: event.titleColor },
-                ]}>
-                {event.title}
-              </Text>
+              <Animated.View style={counterScaleStyle}>
+                <Text
+                  style={[
+                    styles.title,
+                    theme.eventTitleStyle,
+                    { color: event.titleColor },
+                  ]}>
+                  {event.title}
+                </Text>
+              </Animated.View>
             )}
             {/* Dark overlay for pressed state - darkens card without transparency */}
             {pressed && <View style={styles.pressedOverlay} />}

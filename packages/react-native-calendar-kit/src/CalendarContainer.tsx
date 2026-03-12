@@ -117,6 +117,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     allowPinchToZoom = false,
     onZoomChange,
     initialTimeIntervalHeight = 60,
+    initialZoomScale,
     timeZone: initialTimeZone,
     showWeekNumber = false,
     onChange,
@@ -346,12 +347,21 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   const linkedScrollGroup = useLinkedScrollGroup(offsetX);
   const scrollVisibleHeightAnim = useSharedValue(0);
   const timeIntervalHeight = useSharedValue(initialTimeIntervalHeight);
-  const zoomScale = useSharedValue(1);
+  const minZoomScale = minTimeIntervalHeight / initialTimeIntervalHeight;
+  const maxZoomScale = maxTimeIntervalHeight / initialTimeIntervalHeight;
+  // zoomScale is the ONLY SharedValue that changes during pinch.
+  // timeIntervalHeight stays constant at initialTimeIntervalHeight.
+  const zoomScale = useSharedValue(
+    initialZoomScale
+      ? clampValues(initialZoomScale, minZoomScale, maxZoomScale)
+      : 1.0
+  );
   const eventsRef = useRef<EventsRef>(null);
 
   const extraHeight = spaceFromTop + spaceFromBottom;
   const maxTimelineHeight = totalSlots * maxTimeIntervalHeight + extraHeight;
 
+  // minuteHeight, timelineHeight, startOffset are constant (derived from constant TIH)
   const minuteHeight = useDerivedValue(
     () => timeIntervalHeight.value / timeInterval
   );
@@ -360,13 +370,16 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   );
   const startOffset = useDerivedValue(() => start * minuteHeight.value);
 
-  // Emit zoom percentage changes via callback
+  // Emit zoom percentage changes via callback.
+  // Clamp zoomScale to [min, max] before computing percent so that
+  // rubber-band / spring overshoot doesn't report out-of-range values.
   useAnimatedReaction(
     () => {
-      const range = maxTimeIntervalHeight - minTimeIntervalHeight;
+      const range = maxZoomScale - minZoomScale;
       if (range === 0) return 0;
+      const clamped = clampValues(zoomScale.value, minZoomScale, maxZoomScale);
       return Math.round(
-        ((timeIntervalHeight.value - minTimeIntervalHeight) / range) * 100
+        ((clamped - minZoomScale) / range) * 100
       );
     },
     (zoomPercent, prevZoomPercent) => {
@@ -439,7 +452,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
     if (props?.hourScroll) {
       const minutes = date.hour * 60 + date.minute;
-      const position = minutes * minuteHeight.value - startOffset.value;
+      const position =
+        (minutes * minuteHeight.value - startOffset.value) * zoomScale.value;
       const scrollOffset = scrollVisibleHeight.current / 2;
       const animatedHour =
         props?.animatedHour !== undefined ? props.animatedHour : true;
@@ -455,7 +469,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       if (timeInMinutes < start || timeInMinutes > end) {
         return;
       }
-      const position = (timeInMinutes - start) * minuteHeight.value;
+      const position =
+        (timeInMinutes - start) * minuteHeight.value * zoomScale.value;
       runOnUI(() => {
         scrollTo(verticalListRef, 0, position, animated);
       })();
@@ -596,20 +611,23 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   const zoom = useLatestCallback(
     (props?: { scale?: number; height?: number }) => {
       runOnUI(() => {
-        let newHeight = props?.height ?? initialTimeIntervalHeight;
-        if (props?.scale) {
-          newHeight = timeIntervalHeight.value * props.scale;
+        let targetScale = 1.0;
+        if (props?.height) {
+          targetScale = props.height / initialTimeIntervalHeight;
+        } else if (props?.scale) {
+          targetScale = zoomScale.value * props.scale;
         }
-        const clampedHeight = clampValues(
-          newHeight,
-          minTimeIntervalHeight,
-          maxTimeIntervalHeight
+        const clampedScale = clampValues(
+          targetScale,
+          minZoomScale,
+          maxZoomScale
         );
-        const pinchYNormalized = offsetY.value / timeIntervalHeight.value;
-        const pinchYScale = clampedHeight * pinchYNormalized;
-        const y = pinchYScale;
-        timeIntervalHeight.value = withTiming(clampedHeight);
-        scrollTo(verticalListRef, 0, y, true);
+        const oldScale = zoomScale.value;
+        const pinchYNormalized =
+          offsetY.value / (timelineHeight.value * oldScale);
+        zoomScale.value = withTiming(clampedScale);
+        const newY = pinchYNormalized * timelineHeight.value * clampedScale;
+        scrollTo(verticalListRef, 0, newY, true);
       })();
     }
   );
@@ -642,7 +660,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       if (!dateUnixByIndex) {
         return;
       }
-      const minutes = Math.floor(position.y / minuteHeight.value) + start;
+      const minutes =
+        Math.floor(position.y / (minuteHeight.value * zoomScale.value)) + start;
       return parseDateTime(dateUnixByIndex).plus({ minutes });
     }
   );
@@ -693,13 +712,14 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   );
 
   const getSizeByDuration = useLatestCallback((duration: number) => {
-    const height = duration * minuteHeight.value;
+    const height = duration * minuteHeight.value * zoomScale.value;
     return { width: columnWidth, height };
   });
 
   const getVisibleStart = useLatestCallback(() => {
     const currentDate = forceUpdateZone(visibleDateUnix.current, timeZone);
-    const startMinutes = offsetY.value / minuteHeight.value - start;
+    const startMinutes =
+      offsetY.value / (minuteHeight.value * zoomScale.value) - start;
     currentDate.plus({ minutes: startMinutes });
     return dateTimeToISOString(currentDate);
   });
@@ -1032,6 +1052,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       daySnapOffsets,
       handleResourceScrollOffsetChange,
       zoomScale,
+      minZoomScale,
+      maxZoomScale,
     }),
     [
       calendarLayout,
@@ -1090,6 +1112,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       daySnapOffsets,
       handleResourceScrollOffsetChange,
       zoomScale,
+      minZoomScale,
+      maxZoomScale,
     ]
   );
 

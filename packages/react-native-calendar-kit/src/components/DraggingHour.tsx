@@ -35,7 +35,7 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = tr
     { color: hourTextColor, top: -fontSize / 2 },
     hourTextStyle,
   ]);
-  const { minuteHeight, hourFormat, start, hourWidth, numberOfDays } =
+  const { minuteHeight, hourFormat, start, hourWidth, numberOfDays, counterScaleStyle } =
     useBody();
   const locale = useLocale();
   const { roundedDragStartMinutes, roundedDragDuration } = useDragEvent();
@@ -96,17 +96,19 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = tr
           { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
           startAnimStyle,
         ]}>
-        {renderHour ? (
-          renderHour({
-            hourStr: startHourStr,
-            minutes: startMinutes,
-            style,
-          })
-        ) : (
-          <Text style={[style, { color: draggingTextColor }]}>
-            {startHourStr}
-          </Text>
-        )}
+        <Animated.View style={counterScaleStyle}>
+          {renderHour ? (
+            renderHour({
+              hourStr: startHourStr,
+              minutes: startMinutes,
+              style,
+            })
+          ) : (
+            <Text style={[style, { color: draggingTextColor }]}>
+              {startHourStr}
+            </Text>
+          )}
+        </Animated.View>
       </Animated.View>
       {showEndTime && (
         <Animated.View
@@ -116,17 +118,19 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = tr
             { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
             endAnimStyle,
           ]}>
-          {renderHour ? (
-            renderHour({
-              hourStr: endHourStr,
-              minutes: endMinutes,
-              style,
-            })
-          ) : (
-            <Text style={[style, { color: draggingTextColor }]}>
-              {endHourStr}
-            </Text>
-          )}
+          <Animated.View style={counterScaleStyle}>
+            {renderHour ? (
+              renderHour({
+                hourStr: endHourStr,
+                minutes: endMinutes,
+                style,
+              })
+            ) : (
+              <Text style={[style, { color: draggingTextColor }]}>
+                {endHourStr}
+              </Text>
+            )}
+          </Animated.View>
         </Animated.View>
       )}
     </>

@@ -438,6 +438,13 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    */
   minTimeIntervalHeight?: number;
 
+  /**
+   * Initial zoom scale factor for the calendar.
+   * 1.0 = no zoom (default). Values > 1 zoom in, < 1 zoom out.
+   * Useful for restoring a persisted zoom level.
+   */
+  initialZoomScale?: number;
+
   /** Enable pinch to scale height of the calendar */
   allowPinchToZoom?: boolean;
 
@@ -1022,8 +1029,9 @@ export interface CalendarBodyProps {
   /**
    * Headless children rendered inside BodyContext.Provider.
    *
-   * Use this to mount components that need access to BodyContext values
-   * (e.g. SharedValue capture, zoom persistence) without depending on
+   * Use this to mount side-effect components that need access to the
+   * BodyContext (e.g. SharedValue capture for zoom persistence) without
+   * being coupled to the CalendarBody component or the
    * NowIndicatorComponent's lifecycle (which only mounts when today is visible).
    *
    * Children are rendered after the calendar grid, so any non-null output
@@ -1098,15 +1106,18 @@ export interface PackedAllDayEvent extends EventItemInternal {
 
 export interface SizeAnimation {
   width: SharedValue<number>;
+  /**
+   * Layout height at base zoom. Visual height = height * zoomScale.
+   * This value stays constant during pinch — the visual scaling is handled
+   * by a GPU-accelerated scaleY transform on the container.
+   */
   height: SharedValue<number>;
   /**
-   * Current pinch-to-zoom scale factor.
-   * - During gesture: changes per frame (e.g. 1.0 → 1.5)
-   * - At rest / after commit: always 1.0
+   * Persistent zoom scale factor. 1.0 = initial zoom.
+   * Changes during pinch gesture, persists after gesture ends (NOT reset to 1).
    *
-   * Effective visual height = height.value × zoomScale.value.
-   * Consumers can use this to adjust text/layout during the gesture
-   * (e.g. apply counter-scale or switch discrete layout variants).
+   * Consumers should apply `transform: [{ scaleY: 1/zoomScale }]` to content
+   * they don't want vertically stretched by the container's scaleY transform.
    */
-  zoomScale: Readonly<SharedValue<number>>;
+  zoomScale: SharedValue<number>;
 }

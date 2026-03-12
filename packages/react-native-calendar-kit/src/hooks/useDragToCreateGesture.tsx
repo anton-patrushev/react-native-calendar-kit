@@ -20,6 +20,7 @@ const useDragToCreateGesture = ({
     visibleDateUnixAnim,
     columns,
     enableResourceScroll,
+    zoomScale,
   } = useCalendar();
   const {
     allowDragToCreate,
@@ -81,9 +82,10 @@ const useDragToCreateGesture = ({
     initialStart: number
   ) => {
     'worklet';
-    const initialY = (initialStart + extraMinutes.value) * minuteHeight.value;
+    const scaledMinuteHeight = minuteHeight.value * zoomScale.value;
+    const initialY = (initialStart + extraMinutes.value) * scaledMinuteHeight;
     const newY = initialY + translationY;
-    const newDragStart = Math.floor(newY / minuteHeight.value);
+    const newDragStart = Math.floor(newY / scaledMinuteHeight);
     const roundedDragStart = roundMinutes(newDragStart, dragStep, 'floor');
     dragStartMinutes.value = newDragStart;
     roundedDragStartMinutes.value = roundedDragStart;
@@ -157,9 +159,12 @@ const useDragToCreateGesture = ({
       const initialStart = initialDragState.value.dragStart;
 
       if (mode === 'duration') {
+        const scaledMinuteHeight = minuteHeight.value * zoomScale.value;
         const newMinutes =
-          Math.floor((offsetY.value + y - spaceFromTop) / minuteHeight.value) +
-          start;
+          Math.floor(
+            (offsetY.value + y - spaceFromTop * zoomScale.value) /
+              scaledMinuteHeight
+          ) + start;
 
         const {
           newDragSelectedType,

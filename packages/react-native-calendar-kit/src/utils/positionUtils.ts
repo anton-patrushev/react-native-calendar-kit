@@ -1,5 +1,5 @@
 import type { SharedValue } from 'react-native-reanimated';
-import type { DataByMode as CalendarData } from './utils';
+import type { DataByMode } from './utils';
 import { clampValues, findNearestNumber } from './utils';
 
 /**
@@ -8,7 +8,7 @@ import { clampValues, findNearestNumber } from './utils';
  */
 export const getDayIndex = (
   dayUnix: number,
-  calendarData: CalendarData,
+  calendarData: DataByMode,
   visibleDateUnixAnim: SharedValue<number>,
   columns: number
 ): number => {
