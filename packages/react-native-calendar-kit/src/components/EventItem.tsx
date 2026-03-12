@@ -7,18 +7,17 @@ import {
   Pressable,
   type GestureResponderEvent,
 } from 'react-native';
-import { useDerivedValue } from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY } from '../constants';
 import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
-import type { OnEventResponse, PackedEvent, SizeAnimation } from '../types';
+import type { BodyEventSize, OnEventResponse, PackedEvent } from '../types';
 import { parseDateTime } from '../utils/dateUtils';
 import Text from './Text';
 
 interface EventItemProps {
   event: PackedEvent;
   startUnix: number;
-  renderEvent?: (event: PackedEvent, size: SizeAnimation) => React.ReactNode;
+  renderEvent?: (event: PackedEvent, size: BodyEventSize) => React.ReactNode;
   onPressEvent?: (event: OnEventResponse) => void;
   onLongPressEvent?: (
     event: PackedEvent,
@@ -156,11 +155,6 @@ const EventItem: FC<EventItemProps> = ({
       ? totalResources
       : 1;
 
-  const eventHeight = useDerivedValue(
-    () => data.totalDuration * minuteHeight.value - 1,
-    [data.totalDuration]
-  );
-
   const widthPercent = useMemo(() => {
     if (total && columnSpan) {
       const availableWidth = columnWidth / childColumns - rightEdgeSpacing;
@@ -239,8 +233,6 @@ const EventItem: FC<EventItemProps> = ({
 
   const opacity = isDragging ? 0.5 : 1;
 
-  const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
-
   // Compute overlap border style
   const overlapBorderStyle = useMemo(() => {
     // Show border only for stacked events (stackLevel > 0)
@@ -301,8 +293,9 @@ const EventItem: FC<EventItemProps> = ({
             ]}>
             {renderEvent ? (
               renderEvent(eventInput, {
-                width: eventWidthAnim,
-                height: eventHeight,
+                width: eventWidth,
+                minuteHeight,
+                totalDuration: data.totalDuration,
               })
             ) : (
               <Text

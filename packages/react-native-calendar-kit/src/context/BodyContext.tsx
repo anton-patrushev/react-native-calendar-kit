@@ -2,10 +2,10 @@ import React from 'react';
 import type { AnimatedRef, SharedValue } from 'react-native-reanimated';
 import Animated from 'react-native-reanimated';
 import type {
+  BodyEventSize,
   OutOfRangeProps,
   PackedEvent,
   RenderHourProps,
-  SizeAnimation,
   UnavailableHourProps,
 } from '../types';
 import type { DataByMode } from '../utils/utils';
@@ -46,7 +46,7 @@ export interface BodyContextProps {
       height: SharedValue<number>;
     }
   ) => React.ReactNode;
-  renderEvent?: (event: PackedEvent, size: SizeAnimation) => React.ReactNode;
+  renderEvent?: (event: PackedEvent, size: BodyEventSize) => React.ReactNode;
   renderCustomHorizontalLine?: (props: {
     index: number;
     borderColor: string;
@@ -63,6 +63,11 @@ export interface BodyContextProps {
   gridListRef: AnimatedRef<Animated.ScrollView>;
   resourcePerPage: number;
   enableResourceScroll: boolean;
+  dayEndLineStyle?: {
+    borderWidth: number;
+    borderStyle: 'solid' | 'dashed' | 'dotted';
+    borderColor: string;
+  };
 }
 
 export const BodyContext = React.createContext<BodyContextProps | undefined>(

@@ -116,6 +116,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     minTimeIntervalHeight = 60,
     allowPinchToZoom = false,
     onZoomChange,
+    zoomThreshold,
+    onZoomThresholdChange,
     initialTimeIntervalHeight = 60,
     timeZone: initialTimeZone,
     showWeekNumber = false,
@@ -371,6 +373,25 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     (zoomPercent, prevZoomPercent) => {
       if (onZoomChange && zoomPercent !== prevZoomPercent) {
         runOnJS(onZoomChange)(zoomPercent);
+      }
+    }
+  );
+
+  // Threshold-based zoom change — only bridges to JS when the boolean flips.
+  // Use this instead of onZoomChange when a binary state is sufficient
+  // (e.g., toggling quarter-hour lines). At most 1-2 runOnJS calls per pinch.
+  useAnimatedReaction(
+    () => {
+      if (zoomThreshold == null) return false;
+      const range = maxTimeIntervalHeight - minTimeIntervalHeight;
+      if (range === 0) return false;
+      const zoomPercent =
+        ((timeIntervalHeight.value - minTimeIntervalHeight) / range) * 100;
+      return zoomPercent > zoomThreshold;
+    },
+    (isAbove, wasAbove) => {
+      if (onZoomThresholdChange && isAbove !== wasAbove) {
+        runOnJS(onZoomThresholdChange)(isAbove);
       }
     }
   );

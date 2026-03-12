@@ -444,9 +444,29 @@ export interface CalendarProviderProps extends ActionsProviderProps {
   /**
    * Callback when zoom level changes.
    * Provides zoom percentage (0-100) where 0 is min zoom, 100 is max zoom.
-   * Useful for adjusting UI based on zoom level (e.g., showing 15-min intervals when zoomed in).
+   *
+   * **Performance warning:** This fires a `runOnJS` bridge call on every ~1%
+   * zoom change during pinch. Prefer `zoomThreshold` + `onZoomThresholdChange`
+   * if you only need to react at a specific zoom level.
    */
   onZoomChange?: (zoomPercent: number) => void;
+
+  /**
+   * Zoom percentage (0-100) at which `onZoomThresholdChange` fires.
+   * The comparison runs entirely on the UI thread — `runOnJS` only fires
+   * when the boolean flips (at most 1-2 calls per pinch gesture).
+   *
+   * Use with `onZoomThresholdChange` instead of `onZoomChange` when you
+   * only need a binary state (e.g., showing quarter-hour lines when zoomed in).
+   */
+  zoomThreshold?: number;
+
+  /**
+   * Called when zoom crosses `zoomThreshold`.
+   * Receives `true` when zoom percentage rises above the threshold,
+   * `false` when it drops below.
+   */
+  onZoomThresholdChange?: (isAboveThreshold: boolean) => void;
 
   /** Custom time zone */
   timeZone?: string;
@@ -982,7 +1002,7 @@ export interface CalendarBodyProps {
    */
   renderEvent?: (
     event: PackedEvent,
-    size: SizeAnimation
+    size: BodyEventSize
   ) => React.ReactElement | null;
 
   /** Custom draggable event item
@@ -1018,6 +1038,31 @@ export interface CalendarBodyProps {
    * Default: `'rgba(0,0,0,0.3)'`
    */
   tapFeedbackBorderColor?: string;
+
+  /**
+   * Style for the day-end boundary line shown between days in resource scroll mode.
+   * Providing this object enables the line. Omit to disable.
+   *
+   * Defaults when enabled: `{ borderWidth: 1, borderStyle: 'dashed', borderColor: theme.colors.border }`
+   */
+  dayEndLineStyle?: {
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted';
+    borderColor?: string;
+  };
+
+  /**
+   * Headless children rendered inside BodyContext.Provider.
+   *
+   * Use this to mount components that need access to BodyContext values
+   * (e.g. `useBody()`) without affecting the visual layout — for example,
+   * capturing SharedValues into refs or persisting zoom level.
+   *
+   * **Important:** Children are for side-effect components only. They must
+   * return `null` (no visible UI). The library renders them after the
+   * calendar grid, so any non-null output will overlay the calendar.
+   */
+  children?: React.ReactNode;
 }
 
 export interface RenderHourProps {
@@ -1087,4 +1132,24 @@ export interface PackedAllDayEvent extends EventItemInternal {
 export interface SizeAnimation {
   width: SharedValue<number>;
   height: SharedValue<number>;
+}
+
+/**
+ * Lightweight size info passed to body `renderEvent` callbacks.
+ *
+ * Unlike `SizeAnimation`, this carries **no per-event SharedValues** —
+ * `minuteHeight` is the single calendar-level SharedValue shared by ALL events,
+ * and `totalDuration` is a plain number.  Consumers who need an animated height
+ * can derive it in their own worklet: `totalDuration * minuteHeight.value - 1`.
+ *
+ * This eliminates 2 `useDerivedValue` mappers per event that the old
+ * `SizeAnimation` approach required (one for height, one for width).
+ */
+export interface BodyEventSize {
+  /** Static pixel width of the event. */
+  width: number;
+  /** Calendar-level SharedValue: pixels per minute at the current zoom level. */
+  minuteHeight: Readonly<SharedValue<number>>;
+  /** Event's visible duration in minutes (already clamped to the visible time range). */
+  totalDuration: number;
 }

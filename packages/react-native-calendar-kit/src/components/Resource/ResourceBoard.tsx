@@ -21,9 +21,11 @@ import UnavailableHoursByResource from './UnavailableHoursByResource';
 interface ResourceBoardProps {
   resources: ResourceItem[];
   visibleDates: Record<string, { diffDays: number; unix: number }>;
+  isDayEnd?: boolean;
+  isDayStart?: boolean;
 }
 
-const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
+const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: ResourceBoardProps) => {
   const colors = useTheme((state) => state.colors);
 
   const {
@@ -38,6 +40,7 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
     spaceFromBottom,
     timelineHeight,
     showQuarterHourLines,
+    dayEndLineStyle: dayEndLineStyleFromContext,
   } = useBody();
   const { timeZone } = useTimezone();
   const { onPressBackground, onLongPressBackground } = useActions();
@@ -46,6 +49,14 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
   const contentView = useAnimatedStyle(() => ({
     height: timelineHeight.value - spaceFromTop - spaceFromBottom,
   }));
+
+  const resolvedDayEndLineStyle = useMemo(() => {
+    if (!dayEndLineStyleFromContext) return undefined;
+    return {
+      ...dayEndLineStyleFromContext,
+      borderColor: dayEndLineStyleFromContext.borderColor || colors.border,
+    };
+  }, [dayEndLineStyleFromContext, colors.border]);
 
   const onPress = (event: GestureResponderEvent) => {
     const dayUnix = visibleDateUnixAnim.value;
@@ -99,6 +110,10 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
     const lines: React.ReactNode[] = [];
 
     for (let i = 0; i <= resources.length; i++) {
+      if (i === 0 && isDayStart) {
+        continue;
+      }
+      const isRightEdge = i === resources.length;
       lines.push(
         <VerticalLine
           key={i}
@@ -106,11 +121,12 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
           index={i}
           columnWidth={columnWidth}
           childColumns={resourcePerPage}
+          dayEndLineStyle={isRightEdge && isDayEnd ? resolvedDayEndLineStyle : undefined}
         />
       );
     }
     return lines;
-  }, [resources.length, colors.border, columnWidth, resourcePerPage]);
+  }, [resources.length, colors.border, columnWidth, resourcePerPage, isDayEnd, isDayStart, resolvedDayEndLineStyle]);
 
   const _renderHorizontalLines = useMemo(() => {
     const rows: React.ReactNode[] = [];

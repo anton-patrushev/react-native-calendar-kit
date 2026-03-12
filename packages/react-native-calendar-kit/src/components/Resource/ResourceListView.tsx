@@ -34,6 +34,8 @@ export interface ResourceListViewProps {
   renderItem: (item: {
     items: ResourceItem[];
     index: number;
+    isDayEnd?: boolean;
+    isDayStart?: boolean;
   }) => React.ReactNode;
   pagingEnabled?: boolean;
   scrollEnabled?: boolean;
@@ -102,9 +104,15 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
           if (!dateResourceItem) {
             return null;
           }
+          const nextItem = items[index + 1];
+          const prevItem = index > 0 ? items[index - 1] : undefined;
+          const isDayEnd = !!nextItem && nextItem.date !== dateResourceItem.date;
+          const isDayStart = !!prevItem && prevItem.date !== dateResourceItem.date;
           return renderItem({
             items: [dateResourceItem.resource],
             index,
+            isDayEnd,
+            isDayStart,
           });
         }
 

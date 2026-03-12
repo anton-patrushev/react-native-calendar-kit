@@ -2,11 +2,15 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Gesture } from 'react-native-gesture-handler';
 import type { GestureType } from 'react-native-gesture-handler';
 import {
+  cancelAnimation,
   scrollTo,
   setNativeProps,
+  useAnimatedReaction,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import type { AnimatedRef, SharedValue } from 'react-native-reanimated';
+import type Animated from 'react-native-reanimated';
 import { useCalendar } from '../context/CalendarProvider';
 import { clampValues } from '../utils/utils';
 import { Platform } from 'react-native';
@@ -16,6 +20,29 @@ const SPRING_DAMPING = 15;
 const SPRING_STIFFNESS = 100;
 const BOUNDARY_PADDING = 8;
 
+/**
+ * Minimum height change (px) required to propagate a pinch update.
+ * Skipping sub-pixel updates reduces the number of Reanimated mapper
+ * evaluations per frame without any perceptible visual difference.
+ */
+const MIN_HEIGHT_DELTA = 0.5;
+
+/**
+ * Scroll the vertical list to a given offset, using the fastest
+ * available method (setNativeProps > scrollTo).
+ */
+function scrollToOffset(
+  ref: AnimatedRef<Animated.ScrollView>,
+  y: number
+): void {
+  'worklet';
+  if (typeof setNativeProps === 'function') {
+    setNativeProps(ref, { contentOffset: { y, x: 0 } });
+  } else {
+    scrollTo(ref, 0, y, false);
+  }
+}
+
 const usePinchToZoom = () => {
   const {
     verticalListRef,
@@ -24,125 +51,168 @@ const usePinchToZoom = () => {
     timeIntervalHeight,
     offsetY,
     allowPinchToZoom,
+    timeInterval,
   } = useCalendar();
 
-  const startOffsetY = useSharedValue(offsetY.value);
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
-  const startScale = useSharedValue(1);
-  const lastScale = useSharedValue(1);
+
+  // ── Anchor-based state ──────────────────────────────────────────────
+  // Instead of accumulating offsets frame-by-frame (which causes drift),
+  // we store the focal point as a "minute" in the timeline and a fixed
+  // screen-Y position.  Every frame we deterministically recompute the
+  // scroll offset from: newOffset = anchorMinute * minuteHeight − screenY.
+  const anchorMinute = useSharedValue(0);
+  const anchorScreenY = useSharedValue(0);
+  const startHeight = useSharedValue(0);
+
+  // True while gesture is active OR spring is settling.
+  // Used to suppress the JS onScroll handler from overwriting offsetY
+  // with native-clamped values.
+  const isPinching = useSharedValue(false);
 
   const pinchGesture = Gesture.Pinch()
-    .onBegin(() => {
-      startScale.value = lastScale.value;
-      startOffsetY.value = offsetY.value;
+    .onBegin(({ focalY }) => {
+      'worklet';
+      // Cancel any in-progress spring from a previous pinch
+      cancelAnimation(timeIntervalHeight);
+      isPinching.value = true;
+
+      startHeight.value = timeIntervalHeight.value;
+      const minuteHeight = timeIntervalHeight.value / timeInterval;
+      anchorMinute.value = (focalY + offsetY.value) / minuteHeight;
+      anchorScreenY.value = focalY;
     })
     .runOnJS(false)
     .onUpdate(({ focalY, scale, velocity }) => {
+      'worklet';
       if (velocity === 0) {
-        startOffsetY.value = offsetY.value;
+        // Re-anchor when fingers go still (prevents jump on resume)
+        const minuteHeight = timeIntervalHeight.value / timeInterval;
+        anchorMinute.value = (focalY + offsetY.value) / minuteHeight;
+        anchorScreenY.value = focalY;
+        startHeight.value = timeIntervalHeight.value;
         return;
       }
-      // Calculate new scale and height values
-      const newScale = startScale.value * scale;
-      const scaledDiff = (newScale - lastScale.value) * SCALE_FACTOR;
-      const newHeight = timeIntervalHeight.value * (1 + scaledDiff);
-      // Calculate scaling origin point and height difference
-      const scaleOrigin =
-        (focalY + startOffsetY.value) / timeIntervalHeight.value;
-      const heightDiff = newHeight - timeIntervalHeight.value;
-      // Clamp height within allowed bounds
+
+      // Compute height directly from gesture scale (no accumulation).
+      // SCALE_FACTOR dampens sensitivity: scale=1.5 → 1.25x height.
+      const rawHeight = startHeight.value * (1 + (scale - 1) * SCALE_FACTOR);
       const clampedHeight = clampValues(
-        newHeight,
+        rawHeight,
         minTimeIntervalHeight - BOUNDARY_PADDING,
         maxTimeIntervalHeight + BOUNDARY_PADDING
       );
 
-      timeIntervalHeight.value = clampedHeight;
       if (
-        clampedHeight > minTimeIntervalHeight - BOUNDARY_PADDING &&
-        clampedHeight < maxTimeIntervalHeight + BOUNDARY_PADDING
+        Math.abs(clampedHeight - timeIntervalHeight.value) < MIN_HEIGHT_DELTA
       ) {
-        const newOffsetY = startOffsetY.value + heightDiff * scaleOrigin;
-        startOffsetY.value = newOffsetY;
-        offsetY.value = newOffsetY;
-        if (typeof setNativeProps === 'function') {
-          setNativeProps(verticalListRef, {
-            contentOffset: { y: newOffsetY, x: 0 },
-          });
-        } else {
-          scrollTo(verticalListRef, 0, newOffsetY, true);
-        }
+        return;
       }
-      lastScale.value = newScale;
+
+      timeIntervalHeight.value = clampedHeight;
+
+      // Deterministic offset from anchor — no accumulation, no drift.
+      const minuteHeight = clampedHeight / timeInterval;
+      const newOffset = anchorMinute.value * minuteHeight - focalY;
+      offsetY.value = newOffset;
+
+      // Update anchor screen position (focal point can move during pinch)
+      anchorScreenY.value = focalY;
+
+      scrollToOffset(verticalListRef, newOffset);
     })
     .onEnd(() => {
-      // When gesture ends, animate to final values within bounds
+      'worklet';
+      const currentHeight = timeIntervalHeight.value;
       const finalHeight = clampValues(
-        timeIntervalHeight.value,
+        currentHeight,
         minTimeIntervalHeight,
         maxTimeIntervalHeight
       );
+
+      if (Math.abs(finalHeight - currentHeight) < 0.5) {
+        // Already within bounds — no spring needed
+        timeIntervalHeight.value = finalHeight;
+        // Compute final offset
+        const minuteHeight = finalHeight / timeInterval;
+        const newOffset =
+          anchorMinute.value * minuteHeight - anchorScreenY.value;
+        offsetY.value = newOffset;
+        scrollToOffset(verticalListRef, newOffset);
+        isPinching.value = false;
+        return;
+      }
+
+      // Animate to final height — the useAnimatedReaction below
+      // will track each frame and update the scroll offset.
       timeIntervalHeight.value = withSpring(finalHeight, {
         damping: SPRING_DAMPING,
         stiffness: SPRING_STIFFNESS,
       });
-      const scaleFactor = finalHeight / timeIntervalHeight.value;
-      const targetOffset = startOffsetY.value * scaleFactor;
-      offsetY.value = targetOffset;
-      if (typeof setNativeProps === 'function') {
-        setNativeProps(verticalListRef, {
-          contentOffset: { y: targetOffset, x: 0 },
-        });
-      } else {
-        scrollTo(verticalListRef, 0, targetOffset, true);
-      }
-      // Reset scale values
-      lastScale.value = 1;
-      startScale.value = 1;
     })
     .enabled(allowPinchToZoom)
     .withRef(pinchGestureRef);
 
+  // ── Spring tracking ─────────────────────────────────────────────────
+  // While isPinching is true and timeIntervalHeight is animating (spring),
+  // recompute scroll offset every frame to keep the anchor point stable.
+  // This prevents the "content size changes but offset is static" problem.
+  useAnimatedReaction(
+    () => timeIntervalHeight.value,
+    (currentHeight, prevHeight) => {
+      if (!isPinching.value) return;
+      if (prevHeight === null || currentHeight === prevHeight) return;
+
+      const minuteHeight = currentHeight / timeInterval;
+      const newOffset =
+        anchorMinute.value * minuteHeight - anchorScreenY.value;
+      offsetY.value = newOffset;
+      scrollToOffset(verticalListRef, newOffset);
+
+      // Check if spring has settled (within bounds and barely moving)
+      const finalHeight = clampValues(
+        currentHeight,
+        minTimeIntervalHeight,
+        maxTimeIntervalHeight
+      );
+      if (Math.abs(currentHeight - finalHeight) < 0.1) {
+        isPinching.value = false;
+      }
+    }
+  );
+
+  // ── Web: Ctrl+Wheel zoom ───────────────────────────────────────────
   const containerRef = useRef<HTMLElement | null>(null);
+  const lastScale = useSharedValue(1);
   const onWheel = useCallback(
     (event: WheelEvent) => {
       if (event.ctrlKey) {
         event.preventDefault();
 
-        // More stable scale calculation
         const scaleDelta = -event.deltaY * 0.01;
         const newScale = Math.max(0.1, lastScale.value + scaleDelta);
 
-        // Get container bounds for proper focal point calculation
         const containerBounds = containerRef.current?.getBoundingClientRect();
         const containerTop = containerBounds?.top || 0;
         const focalY = event.clientY - containerTop;
 
-        // Calculate height change based on scale difference
         const scaleFactor = newScale / lastScale.value;
         const newHeight = timeIntervalHeight.value * scaleFactor;
 
-        // Clamp height within allowed bounds
         const clampedHeight = clampValues(
           newHeight,
           minTimeIntervalHeight,
           maxTimeIntervalHeight
         );
 
-        // Only update if within bounds
         if (clampedHeight !== timeIntervalHeight.value) {
           const heightDiff = clampedHeight - timeIntervalHeight.value;
-
-          // Calculate scaling origin point relative to current scroll position
           const scaleOrigin =
             (focalY + offsetY.value) / timeIntervalHeight.value;
-
-          // Adjust scroll position to maintain focal point
           const newOffsetY = offsetY.value + heightDiff * scaleOrigin;
 
           timeIntervalHeight.value = clampedHeight;
           offsetY.value = newOffsetY;
-
           scrollTo(verticalListRef, 0, newOffsetY, false);
         }
 
@@ -172,7 +242,7 @@ const usePinchToZoom = () => {
     };
   }, [onWheel, verticalListRef]);
 
-  return { pinchGesture, pinchGestureRef };
+  return { pinchGesture, pinchGestureRef, isPinching };
 };
 
 export default usePinchToZoom;

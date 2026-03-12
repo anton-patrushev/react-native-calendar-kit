@@ -57,6 +57,8 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   NowIndicatorComponent,
   renderCustomHorizontalLine,
   showDraggingEndTime = true,
+  dayEndLineStyle: dayEndLineStyleProp,
+  children,
 }) => {
   const {
     calendarLayout,
@@ -141,7 +143,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     height: timelineHeight.value,
   }));
 
-  const { pinchGesture, pinchGestureRef } = usePinchToZoom();
+  const { pinchGesture, pinchGestureRef, isPinching } = usePinchToZoom();
   const dragEventGesture = useDragEventGesture();
   const dragToCreateGesture = useDragToCreateGesture({
     mode: dragToCreateMode,
@@ -198,6 +200,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   );
 
   const _onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // During pinch (active gesture + spring settle), the pinch handler
+    // owns offsetY. Letting onScroll overwrite it with native-clamped
+    // values creates a feedback loop that causes visible shaking.
+    if (isPinching.value) return;
     offsetY.value = e.nativeEvent.contentOffset.y;
   };
 
@@ -218,10 +224,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   }, [hourFormat, locale.meridiem, slots]);
 
   const _renderResourceItem = useCallback(
-    (item: { items: ResourceItem[]; index: number }) => {
+    (item: { items: ResourceItem[]; index: number; isDayEnd?: boolean; isDayStart?: boolean }) => {
       // In dual-axis mode, get the date for this specific item
       const dateUnix = dateResourceItems?.[item.index]?.date;
-      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} />;
+      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} isDayEnd={item.isDayEnd} isDayStart={item.isDayStart} />;
     },
     [dateResourceItems]
   );
@@ -271,6 +277,13 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       gridListRef,
       resourcePerPage,
       enableResourceScroll,
+      dayEndLineStyle: dayEndLineStyleProp
+        ? {
+            borderWidth: dayEndLineStyleProp.borderWidth ?? 1,
+            borderStyle: dayEndLineStyleProp.borderStyle ?? 'dashed',
+            borderColor: dayEndLineStyleProp.borderColor ?? '',
+          }
+        : undefined,
     }),
     [
       renderHour,
@@ -316,6 +329,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       gridListRef,
       resourcePerPage,
       enableResourceScroll,
+      dayEndLineStyleProp,
     ]
   );
 
@@ -449,6 +463,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                 </View>
               </View>
             </Animated.View>
+
+            {/* Headless children — side-effect components that need BodyContext
+                (e.g. SharedValue capture, zoom persistence). Must return null. */}
+            {children}
           </BodyContext.Provider>
         </AnimatedScrollView>
       </GestureDetector>
