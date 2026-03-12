@@ -1,5 +1,5 @@
 import type { SharedValue } from 'react-native-reanimated';
-import type { CalendarData } from '../context/CalendarProvider';
+import type { DataByMode as CalendarData } from './utils';
 import { clampValues, findNearestNumber } from './utils';
 
 /**

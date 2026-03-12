@@ -1018,6 +1018,18 @@ export interface CalendarBodyProps {
    * Default: `'rgba(0,0,0,0.3)'`
    */
   tapFeedbackBorderColor?: string;
+
+  /**
+   * Headless children rendered inside BodyContext.Provider.
+   *
+   * Use this to mount components that need access to BodyContext values
+   * (e.g. SharedValue capture, zoom persistence) without depending on
+   * NowIndicatorComponent's lifecycle (which only mounts when today is visible).
+   *
+   * Children are rendered after the calendar grid, so any non-null output
+   * will overlay the calendar.
+   */
+  children?: React.ReactNode;
 }
 
 export interface RenderHourProps {

@@ -57,6 +57,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   NowIndicatorComponent,
   renderCustomHorizontalLine,
   showDraggingEndTime = true,
+  children,
 }) => {
   const {
     calendarLayout,
@@ -449,6 +450,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                 </View>
               </View>
             </Animated.View>
+
+            {/* Headless children — side-effect components that need BodyContext
+                (e.g. SharedValue capture, zoom persistence). Must return null. */}
+            {children}
           </BodyContext.Provider>
         </AnimatedScrollView>
       </GestureDetector>
