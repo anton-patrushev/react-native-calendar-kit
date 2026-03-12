@@ -1099,4 +1099,14 @@ export interface PackedAllDayEvent extends EventItemInternal {
 export interface SizeAnimation {
   width: SharedValue<number>;
   height: SharedValue<number>;
+  /**
+   * Current pinch-to-zoom scale factor.
+   * - During gesture: changes per frame (e.g. 1.0 → 1.5)
+   * - At rest / after commit: always 1.0
+   *
+   * Effective visual height = height.value × zoomScale.value.
+   * Consumers can use this to adjust text/layout during the gesture
+   * (e.g. apply counter-scale or switch discrete layout variants).
+   */
+  zoomScale: Readonly<SharedValue<number>>;
 }

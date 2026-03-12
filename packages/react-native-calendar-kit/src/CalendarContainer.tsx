@@ -346,6 +346,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   const linkedScrollGroup = useLinkedScrollGroup(offsetX);
   const scrollVisibleHeightAnim = useSharedValue(0);
   const timeIntervalHeight = useSharedValue(initialTimeIntervalHeight);
+  const zoomScale = useSharedValue(1);
   const eventsRef = useRef<EventsRef>(null);
 
   const extraHeight = spaceFromTop + spaceFromBottom;
@@ -1030,6 +1031,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       dateResourceItems,
       daySnapOffsets,
       handleResourceScrollOffsetChange,
+      zoomScale,
     }),
     [
       calendarLayout,
@@ -1087,6 +1089,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       dateResourceItems,
       daySnapOffsets,
       handleResourceScrollOffsetChange,
+      zoomScale,
     ]
   );
 

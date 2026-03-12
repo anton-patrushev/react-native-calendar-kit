@@ -67,6 +67,11 @@ export interface CalendarContextProps {
   dateResourceItems?: DateResourceItem[];
   daySnapOffsets?: number[];
   handleResourceScrollOffsetChange?: (offset: number) => void;
+  /**
+   * Scale factor applied via CSS transform during pinch-to-zoom gesture.
+   * 1.0 at rest; changes during gesture; resets to 1.0 on commit.
+   */
+  zoomScale: SharedValue<number>;
 }
 
 export const CalendarContext = React.createContext<

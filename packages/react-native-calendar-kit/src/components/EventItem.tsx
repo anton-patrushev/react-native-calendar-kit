@@ -59,6 +59,7 @@ const EventItem: FC<EventItemProps> = ({
     columnWidth,
     resourcePerPage,
     enableResourceScroll,
+    zoomScale,
   } = useBody();
   const { _internal, ...event } = eventInput;
   const timeRange = end - start;
@@ -303,6 +304,7 @@ const EventItem: FC<EventItemProps> = ({
               renderEvent(eventInput, {
                 width: eventWidthAnim,
                 height: eventHeight,
+                zoomScale,
               })
             ) : (
               <Text

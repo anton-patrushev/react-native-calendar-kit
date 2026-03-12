@@ -63,6 +63,8 @@ export interface BodyContextProps {
   gridListRef: AnimatedRef<Animated.ScrollView>;
   resourcePerPage: number;
   enableResourceScroll: boolean;
+  /** Scale factor during pinch-to-zoom gesture. 1.0 at rest. */
+  zoomScale: SharedValue<number>;
 }
 
 export const BodyContext = React.createContext<BodyContextProps | undefined>(
