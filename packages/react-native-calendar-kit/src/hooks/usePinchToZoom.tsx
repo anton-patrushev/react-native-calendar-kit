@@ -18,6 +18,8 @@ const SPRING_STIFFNESS = 100;
 /** Allow overscrolling past min/max by this fraction of zoomScale range. */
 const BOUNDARY_PADDING_FRAC = 0.05;
 
+const IS_ANDROID = Platform.OS === 'android';
+
 const usePinchToZoom = () => {
   const {
     verticalListRef,
@@ -34,9 +36,8 @@ const usePinchToZoom = () => {
   const lastScale = useSharedValue(1);
 
   // Gesture-start snapshot — used for focal-point anchoring.
-  // On Android, RNGH's transformPoint uses a stale scroll offset after
-  // setNativeProps, so per-frame focalY values drift. By computing the
-  // anchor once at gesture start we avoid accumulating that error.
+  // We compute the anchor once at gesture start and derive the scroll
+  // offset purely from the zoom ratio change each frame.
   const startFocalY = useSharedValue(0);
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
@@ -53,6 +54,16 @@ const usePinchToZoom = () => {
       startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
+
+      // On Android, the ScrollView's native pan gesture fires simultaneously
+      // with the pinch (via simultaneousHandlers). The midpoint of two fingers
+      // naturally moves as they spread/squeeze — Android interprets this as a
+      // pan, scrolling the view and fighting our programmatic offset.
+      // Disabling scrollEnabled blocks touch-initiated scrolls while still
+      // allowing our programmatic scrollTo calls.
+      if (IS_ANDROID) {
+        setNativeProps(verticalListRef, { scrollEnabled: false });
+      }
     })
     .runOnJS(false)
     .onUpdate(({ scale, velocity }) => {
@@ -87,13 +98,10 @@ const usePinchToZoom = () => {
         startFocalY.value;
 
       offsetY.value = newOffsetY;
-      if (typeof setNativeProps === 'function') {
-        setNativeProps(verticalListRef, {
-          contentOffset: { y: newOffsetY, x: 0 },
-        });
-      } else {
-        scrollTo(verticalListRef, 0, newOffsetY, false);
-      }
+      // Use scrollTo (not setNativeProps with contentOffset) — it's the
+      // correct API for programmatic scrolling and works reliably on both
+      // platforms with AnimatedRef<ScrollView>.
+      scrollTo(verticalListRef, 0, newOffsetY, false);
       lastScale.value = newGestureScale;
     })
     .onEnd(() => {
@@ -117,17 +125,17 @@ const usePinchToZoom = () => {
           stiffness: SPRING_STIFFNESS,
         });
         offsetY.value = targetOffset;
-        if (typeof setNativeProps === 'function') {
-          setNativeProps(verticalListRef, {
-            contentOffset: { y: targetOffset, x: 0 },
-          });
-        } else {
-          scrollTo(verticalListRef, 0, targetOffset, false);
-        }
+        scrollTo(verticalListRef, 0, targetOffset, false);
       }
       // Reset gesture scale trackers (NOT zoomScale — it persists)
       lastScale.value = 1;
       startScale.value = 1;
+    })
+    .onFinalize(() => {
+      // Re-enable native scrolling after pinch ends (or is cancelled/fails).
+      if (IS_ANDROID) {
+        setNativeProps(verticalListRef, { scrollEnabled: true });
+      }
     })
     .enabled(allowPinchToZoom)
     .withRef(pinchGestureRef);
