@@ -29,25 +29,34 @@ const usePinchToZoom = () => {
     allowPinchToZoom,
   } = useCalendar();
 
-  const startOffsetY = useSharedValue(offsetY.value);
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
   const startScale = useSharedValue(1);
   const lastScale = useSharedValue(1);
+
+  // Gesture-start snapshot — used for focal-point anchoring.
+  // On Android, RNGH's transformPoint uses a stale scroll offset after
+  // setNativeProps, so per-frame focalY values drift. By computing the
+  // anchor once at gesture start we avoid accumulating that error.
+  const startFocalY = useSharedValue(0);
+  const startOffsetY = useSharedValue(0);
+  const startZoomScale = useSharedValue(1);
 
   const boundaryPadding =
     (maxZoomScale - minZoomScale) * BOUNDARY_PADDING_FRAC;
 
   const pinchGesture = Gesture.Pinch()
-    .onBegin(() => {
+    .onBegin(({ focalY }) => {
       // Cancel any in-flight overscroll spring from a previous gesture.
       cancelAnimation(zoomScale);
       startScale.value = lastScale.value;
+      // Snapshot current state for focal-point anchoring
+      startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
+      startZoomScale.value = zoomScale.value;
     })
     .runOnJS(false)
-    .onUpdate(({ focalY, scale, velocity }) => {
+    .onUpdate(({ scale, velocity }) => {
       if (velocity === 0) {
-        startOffsetY.value = offsetY.value;
         return;
       }
       const oldZoomScale = zoomScale.value;
@@ -63,22 +72,27 @@ const usePinchToZoom = () => {
         maxZoomScale + boundaryPadding
       );
 
-      // Focal-point anchoring: keep the point under the finger stationary
+      // Focal-point anchoring using gesture-start snapshot.
+      // anchorFrac = normalized position (0..1) of the focal point in content
+      // space at gesture start. We scale it by the new zoom to get the new
+      // content-space position, then subtract the original viewport focalY
+      // to get the scroll offset that keeps the anchor stationary on screen.
+      const anchorContentY = startFocalY.value + startOffsetY.value;
       const anchorFrac =
-        (focalY + startOffsetY.value) /
-        (timelineHeight.value * oldZoomScale);
+        anchorContentY / (timelineHeight.value * startZoomScale.value);
+
       zoomScale.value = clampedZoomScale;
       const newOffsetY =
-        anchorFrac * timelineHeight.value * clampedZoomScale - focalY;
+        anchorFrac * timelineHeight.value * clampedZoomScale -
+        startFocalY.value;
 
-      startOffsetY.value = newOffsetY;
       offsetY.value = newOffsetY;
       if (typeof setNativeProps === 'function') {
         setNativeProps(verticalListRef, {
           contentOffset: { y: newOffsetY, x: 0 },
         });
       } else {
-        scrollTo(verticalListRef, 0, newOffsetY, true);
+        scrollTo(verticalListRef, 0, newOffsetY, false);
       }
       lastScale.value = newGestureScale;
     })
@@ -90,19 +104,25 @@ const usePinchToZoom = () => {
         maxZoomScale
       );
       if (finalZoomScale !== zoomScale.value) {
+        // Recompute target offset using the same anchor from gesture start
+        const anchorContentY = startFocalY.value + startOffsetY.value;
+        const anchorFrac =
+          anchorContentY / (timelineHeight.value * startZoomScale.value);
+        const targetOffset =
+          anchorFrac * timelineHeight.value * finalZoomScale -
+          startFocalY.value;
+
         zoomScale.value = withSpring(finalZoomScale, {
           damping: SPRING_DAMPING,
           stiffness: SPRING_STIFFNESS,
         });
-        const scaleFactor = finalZoomScale / zoomScale.value;
-        const targetOffset = startOffsetY.value * scaleFactor;
         offsetY.value = targetOffset;
         if (typeof setNativeProps === 'function') {
           setNativeProps(verticalListRef, {
             contentOffset: { y: targetOffset, x: 0 },
           });
         } else {
-          scrollTo(verticalListRef, 0, targetOffset, true);
+          scrollTo(verticalListRef, 0, targetOffset, false);
         }
       }
       // Reset gesture scale trackers (NOT zoomScale — it persists)
