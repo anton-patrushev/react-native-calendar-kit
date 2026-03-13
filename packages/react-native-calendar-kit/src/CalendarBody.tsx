@@ -43,6 +43,7 @@ import {
 } from './utils/dateUtils';
 
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
+const IS_ANDROID = Platform.OS === 'android';
 
 const CalendarBody: React.FC<CalendarBodyProps> = ({
   hourFormat = 'HH:mm',
@@ -147,9 +148,16 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     height: timelineHeight.value * zoomScale.value,
   }));
 
-  // Inner container: GPU-accelerated scaleY transform
+  // Inner container: GPU-accelerated scaleY transform.
+  // The translateY simulates transformOrigin: '0% 0%' (top-left) by
+  // compensating for the default center-origin scaling. This is more
+  // reliable than transformOrigin across platforms (Android may ignore
+  // transformOrigin when it's in a separate style object from transform).
   const innerScaleStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleY: zoomScale.value }],
+    transform: [
+      { translateY: (timelineHeight.value / 2) * (zoomScale.value - 1) },
+      { scaleY: zoomScale.value },
+    ],
   }));
 
   // Counter-scale style shared across all children via BodyContext
@@ -157,7 +165,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     transform: [{ scaleY: 1 / zoomScale.value }],
   }));
 
-  const { pinchGesture, pinchGestureRef } = usePinchToZoom();
+  const { pinchGesture, pinchGestureRef, isPinching } = usePinchToZoom();
   const dragEventGesture = useDragEventGesture();
   const dragToCreateGesture = useDragToCreateGesture({
     mode: dragToCreateMode,
@@ -214,6 +222,11 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   );
 
   const _onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // On Android, skip offsetY updates while pinching. The ScrollView may
+    // fire onScroll with auto-adjusted offsets (from content size changes or
+    // the simultaneous pan gesture) that would overwrite our focal-point
+    // computed offset. iOS doesn't have this issue.
+    if (IS_ANDROID && isPinching.value) return;
     offsetY.value = e.nativeEvent.contentOffset.y;
   };
 
@@ -397,7 +410,6 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                   {
                     width: calendarLayout.width,
                     height: timelineHeight.value,
-                    transformOrigin: '0% 0%',
                   },
                   innerScaleStyle,
                 ]}>

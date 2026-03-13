@@ -4,7 +4,6 @@ import type { GestureType } from 'react-native-gesture-handler';
 import {
   cancelAnimation,
   scrollTo,
-  setNativeProps,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
@@ -17,8 +16,6 @@ const SPRING_DAMPING = 15;
 const SPRING_STIFFNESS = 100;
 /** Allow overscrolling past min/max by this fraction of zoomScale range. */
 const BOUNDARY_PADDING_FRAC = 0.05;
-
-const IS_ANDROID = Platform.OS === 'android';
 
 const usePinchToZoom = () => {
   const {
@@ -42,6 +39,11 @@ const usePinchToZoom = () => {
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
 
+  // Exposed to CalendarBody so _onScroll can skip offsetY updates on
+  // Android while pinching (prevents native scroll auto-adjustments
+  // from overwriting our computed offset).
+  const isPinching = useSharedValue(false);
+
   const boundaryPadding =
     (maxZoomScale - minZoomScale) * BOUNDARY_PADDING_FRAC;
 
@@ -54,16 +56,7 @@ const usePinchToZoom = () => {
       startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
-
-      // On Android, the ScrollView's native pan gesture fires simultaneously
-      // with the pinch (via simultaneousHandlers). The midpoint of two fingers
-      // naturally moves as they spread/squeeze — Android interprets this as a
-      // pan, scrolling the view and fighting our programmatic offset.
-      // Disabling scrollEnabled blocks touch-initiated scrolls while still
-      // allowing our programmatic scrollTo calls.
-      if (IS_ANDROID) {
-        setNativeProps(verticalListRef, { scrollEnabled: false });
-      }
+      isPinching.value = true;
     })
     .runOnJS(false)
     .onUpdate(({ scale, velocity }) => {
@@ -98,9 +91,6 @@ const usePinchToZoom = () => {
         startFocalY.value;
 
       offsetY.value = newOffsetY;
-      // Use scrollTo (not setNativeProps with contentOffset) — it's the
-      // correct API for programmatic scrolling and works reliably on both
-      // platforms with AnimatedRef<ScrollView>.
       scrollTo(verticalListRef, 0, newOffsetY, false);
       lastScale.value = newGestureScale;
     })
@@ -132,10 +122,7 @@ const usePinchToZoom = () => {
       startScale.value = 1;
     })
     .onFinalize(() => {
-      // Re-enable native scrolling after pinch ends (or is cancelled/fails).
-      if (IS_ANDROID) {
-        setNativeProps(verticalListRef, { scrollEnabled: true });
-      }
+      isPinching.value = false;
     })
     .enabled(allowPinchToZoom)
     .withRef(pinchGestureRef);
@@ -203,7 +190,7 @@ const usePinchToZoom = () => {
     };
   }, [onWheel, verticalListRef]);
 
-  return { pinchGesture, pinchGestureRef };
+  return { pinchGesture, pinchGestureRef, isPinching };
 };
 
 export default usePinchToZoom;
