@@ -10,7 +10,10 @@ import {
   GestureDetector,
   ScrollView,
 } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useDerivedValue,
+} from 'react-native-reanimated';
 import BodyItem from './components/BodyItem';
 import BodyResourceItem from './components/BodyResourceItem';
 import CalendarListView from './components/CalendarListView';
@@ -40,6 +43,7 @@ import {
 } from './utils/dateUtils';
 
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
+const IS_ANDROID = Platform.OS === 'android';
 
 const CalendarBody: React.FC<CalendarBodyProps> = ({
   hourFormat = 'HH:mm',
@@ -56,7 +60,9 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   renderDraggingHour,
   NowIndicatorComponent,
   renderCustomHorizontalLine,
+  dayEndLineStyle: dayEndLineStyleProp,
   showDraggingEndTime = true,
+  children,
 }) => {
   const {
     calendarLayout,
@@ -107,6 +113,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     dateResourceItems,
     daySnapOffsets,
     handleResourceScrollOffsetChange,
+    zoomScale,
   } = useCalendar();
   const {
     onTouchStart,
@@ -137,11 +144,29 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
-  const animContentStyle = useAnimatedStyle(() => ({
-    height: timelineHeight.value,
+  // Outer spacer: scales scroll content size with zoomScale
+  const outerSpacerStyle = useAnimatedStyle(() => ({
+    height: timelineHeight.value * zoomScale.value,
   }));
 
-  const { pinchGesture, pinchGestureRef } = usePinchToZoom();
+  // Inner container: GPU-accelerated scaleY transform.
+  // The translateY simulates transformOrigin: '0% 0%' (top-left) by
+  // compensating for the default center-origin scaling. This is more
+  // reliable than transformOrigin across platforms (Android may ignore
+  // transformOrigin when it's in a separate style object from transform).
+  const innerScaleStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: (timelineHeight.value / 2) * (zoomScale.value - 1) },
+      { scaleY: zoomScale.value },
+    ],
+  }));
+
+  // Counter-scale style shared across all children via BodyContext
+  const counterScaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scaleY: 1 / zoomScale.value }],
+  }));
+
+  const { pinchGesture, pinchGestureRef, isPinching } = usePinchToZoom();
   const dragEventGesture = useDragEventGesture();
   const dragToCreateGesture = useDragToCreateGesture({
     mode: dragToCreateMode,
@@ -198,6 +223,11 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   );
 
   const _onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // On Android, skip offsetY updates while pinching. The ScrollView may
+    // fire onScroll with auto-adjusted offsets (from content size changes or
+    // the simultaneous pan gesture) that would overwrite our focal-point
+    // computed offset. iOS doesn't have this issue.
+    if (IS_ANDROID && isPinching.value) return;
     offsetY.value = e.nativeEvent.contentOffset.y;
   };
 
@@ -218,10 +248,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   }, [hourFormat, locale.meridiem, slots]);
 
   const _renderResourceItem = useCallback(
-    (item: { items: ResourceItem[]; index: number }) => {
+    (item: { items: ResourceItem[]; index: number; isDayEnd?: boolean; isDayStart?: boolean }) => {
       // In dual-axis mode, get the date for this specific item
       const dateUnix = dateResourceItems?.[item.index]?.date;
-      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} />;
+      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} isDayEnd={item.isDayEnd} isDayStart={item.isDayStart} />;
     },
     [dateResourceItems]
   );
@@ -271,6 +301,15 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       gridListRef,
       resourcePerPage,
       enableResourceScroll,
+      dayEndLineStyle: dayEndLineStyleProp
+        ? {
+            borderWidth: dayEndLineStyleProp.borderWidth ?? 1,
+            borderStyle: dayEndLineStyleProp.borderStyle ?? 'dashed',
+            borderColor: dayEndLineStyleProp.borderColor ?? '',
+          }
+        : undefined,
+      zoomScale,
+      counterScaleStyle,
     }),
     [
       renderHour,
@@ -316,6 +355,9 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       gridListRef,
       resourcePerPage,
       enableResourceScroll,
+      dayEndLineStyleProp,
+      zoomScale,
+      counterScaleStyle,
     ]
   );
 
@@ -359,6 +401,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
           }
           simultaneousHandlers={pinchGestureRef}>
           <BodyContext.Provider value={value}>
+            {/* Outer spacer: height = timelineHeight * zoomScale (drives ScrollView content size) */}
             <Animated.View
               style={[
                 {
@@ -368,8 +411,17 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                     default: 'visible',
                   }),
                 },
-                animContentStyle,
+                outerSpacerStyle,
               ]}>
+              {/* Inner scale container: GPU-accelerated scaleY transform */}
+              <Animated.View
+                style={[
+                  {
+                    width: calendarLayout.width,
+                    height: timelineHeight.value,
+                  },
+                  innerScaleStyle,
+                ]}>
               <View
                 style={[
                   styles.absolute,
@@ -448,7 +500,12 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                   />
                 </View>
               </View>
+              </Animated.View>
             </Animated.View>
+
+            {/* Headless children — side-effect components that need BodyContext
+                (e.g. SharedValue capture, zoom persistence). Must return null. */}
+            {children}
           </BodyContext.Provider>
         </AnimatedScrollView>
       </GestureDetector>

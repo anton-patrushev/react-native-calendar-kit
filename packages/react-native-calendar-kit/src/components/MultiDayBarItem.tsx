@@ -4,6 +4,7 @@ import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useDerivedValue,
+  useSharedValue,
 } from 'react-native-reanimated';
 import { useActions } from '../context/ActionsProvider';
 import { useHeader } from '../context/DayBarContext';
@@ -267,6 +268,8 @@ const EventItem = ({
 
   const eventWidth = _internal.columnSpan * columnWidth - rightEdgeSpacing;
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
+  // All-day bar events don't participate in pinch-to-zoom.
+  const staticZoomScale = useSharedValue(1);
 
   const isShow = useDerivedValue(() => {
     return isExpanded.value || _internal.rowIndex < 2;
@@ -312,6 +315,7 @@ const EventItem = ({
           renderEvent(event, {
             width: eventWidthAnim,
             height: eventHeight,
+            zoomScale: staticZoomScale,
           })
         ) : (
           <Text

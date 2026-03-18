@@ -15,9 +15,11 @@ import ResourceBoard from './Resource/ResourceBoard';
 interface BodyResourceItemProps {
   resources: ResourceItem[];
   dateUnix?: number;
+  isDayEnd?: boolean;
+  isDayStart?: boolean;
 }
 
-const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
+const BodyResourceItem = ({ resources, dateUnix, isDayEnd, isDayStart }: BodyResourceItemProps) => {
   const { spaceFromTop, timelineHeight, spaceFromBottom } = useBody();
   const globalVisibleDateUnix = useDateChangedListener();
 
@@ -43,7 +45,7 @@ const BodyResourceItem = ({ resources, dateUnix }: BodyResourceItemProps) => {
 
   return (
     <View style={styles.container}>
-      <ResourceBoard resources={resources} visibleDates={visibleDates} />
+      <ResourceBoard resources={resources} visibleDates={visibleDates} isDayEnd={isDayEnd} isDayStart={isDayStart} />
       <Animated.View
         pointerEvents="box-none"
         style={[

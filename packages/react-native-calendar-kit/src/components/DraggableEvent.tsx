@@ -57,7 +57,8 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
       };
     }, [])
   );
-  const { minuteHeight, columnWidth, start, numberOfDays } = useBody();
+  const { minuteHeight, columnWidth, start, numberOfDays, counterScaleStyle } =
+    useBody();
   const {
     dragStartUnix,
     dragSelectedStartUnix,
@@ -193,9 +194,11 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
               height: eventHeight,
             })
           ) : (
-            <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
-              {selectedEvent.title}
-            </Text>
+            <Animated.View style={counterScaleStyle}>
+              <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
+                {selectedEvent.title}
+              </Text>
+            </Animated.View>
           )}
         </View>
       )}
@@ -204,26 +207,28 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
       </GestureDetector>
       <GestureDetector gesture={topEdgeGesture}>
         {TopEdgeComponent || (
-          <View
+          <Animated.View
             style={[
               styles.dot,
               styles.dotLeft,
               numberOfDays === 1 && styles.dotLeftSingle,
+              counterScaleStyle,
             ]}>
             <DragDot />
-          </View>
+          </Animated.View>
         )}
       </GestureDetector>
       <GestureDetector gesture={bottomEdgeGesture}>
         {BottomEdgeComponent || (
-          <View
+          <Animated.View
             style={[
               styles.dot,
               styles.dotRight,
               numberOfDays === 1 && styles.dotRightSingle,
+              counterScaleStyle,
             ]}>
             <DragDot />
-          </View>
+          </Animated.View>
         )}
       </GestureDetector>
     </Animated.View>

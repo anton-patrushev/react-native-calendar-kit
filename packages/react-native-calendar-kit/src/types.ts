@@ -438,6 +438,13 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    */
   minTimeIntervalHeight?: number;
 
+  /**
+   * Initial zoom scale factor for the calendar.
+   * 1.0 = no zoom (default). Values > 1 zoom in, < 1 zoom out.
+   * Useful for restoring a persisted zoom level.
+   */
+  initialZoomScale?: number;
+
   /** Enable pinch to scale height of the calendar */
   allowPinchToZoom?: boolean;
 
@@ -1018,6 +1025,31 @@ export interface CalendarBodyProps {
    * Default: `'rgba(0,0,0,0.3)'`
    */
   tapFeedbackBorderColor?: string;
+
+  /**
+   * Style for the day-end boundary line shown between days in resource scroll mode.
+   * Providing this object enables the line. Omit to disable.
+   *
+   * Defaults when enabled: `{ borderWidth: 1, borderStyle: 'dashed', borderColor: theme.colors.border }`
+   */
+  dayEndLineStyle?: {
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted';
+    borderColor?: string;
+  };
+
+  /**
+   * Headless children rendered inside BodyContext.Provider.
+   *
+   * Use this to mount side-effect components that need access to the
+   * BodyContext (e.g. SharedValue capture for zoom persistence) without
+   * being coupled to the CalendarBody component or the
+   * NowIndicatorComponent's lifecycle (which only mounts when today is visible).
+   *
+   * Children are rendered after the calendar grid, so any non-null output
+   * will overlay the calendar.
+   */
+  children?: React.ReactNode;
 }
 
 export interface RenderHourProps {
@@ -1086,5 +1118,18 @@ export interface PackedAllDayEvent extends EventItemInternal {
 
 export interface SizeAnimation {
   width: SharedValue<number>;
+  /**
+   * Layout height at base zoom. Visual height = height * zoomScale.
+   * This value stays constant during pinch — the visual scaling is handled
+   * by a GPU-accelerated scaleY transform on the container.
+   */
   height: SharedValue<number>;
+  /**
+   * Persistent zoom scale factor. 1.0 = initial zoom.
+   * Changes during pinch gesture, persists after gesture ends (NOT reset to 1).
+   *
+   * Consumers should apply `transform: [{ scaleY: 1/zoomScale }]` to content
+   * they don't want vertically stretched by the container's scaleY transform.
+   */
+  zoomScale: SharedValue<number>;
 }

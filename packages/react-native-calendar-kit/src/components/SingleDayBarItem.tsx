@@ -5,6 +5,7 @@ import type { SharedValue } from 'react-native-reanimated';
 import Animated, {
   useAnimatedStyle,
   useDerivedValue,
+  useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import { COLLAPSED_ITEMS } from '../constants';
@@ -226,6 +227,8 @@ const EventItem = ({
 
   const eventWidth = columnWidth - rightEdgeSpacing;
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
+  // All-day bar events don't participate in pinch-to-zoom.
+  const staticZoomScale = useSharedValue(1);
 
   const isShow = useDerivedValue(() => {
     return isExpanded.value || _internal.rowIndex < 2;
@@ -262,6 +265,7 @@ const EventItem = ({
           renderEvent(event, {
             width: eventWidthAnim,
             height: eventHeight,
+            zoomScale: staticZoomScale,
           })
         ) : (
           <Text

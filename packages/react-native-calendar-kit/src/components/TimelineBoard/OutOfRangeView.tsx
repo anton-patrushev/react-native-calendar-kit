@@ -16,6 +16,7 @@ const OutOfRangeView = ({
     renderCustomOutOfRange,
     timeIntervalHeight,
     totalSlots,
+    zoomScale,
   } = useBody();
   const disableBackgroundColor = useTheme(
     (state) => state.outOfRangeBackgroundColor || state.colors.surface
@@ -48,6 +49,7 @@ const OutOfRangeView = ({
         renderCustomOutOfRange({
           width: disableWidth,
           height: disableHeight,
+          zoomScale,
         })}
     </View>
   );
