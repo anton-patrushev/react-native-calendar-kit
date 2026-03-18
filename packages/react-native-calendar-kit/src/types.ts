@@ -1027,6 +1027,18 @@ export interface CalendarBodyProps {
   tapFeedbackBorderColor?: string;
 
   /**
+   * Style for the day-end boundary line shown between days in resource scroll mode.
+   * Providing this object enables the line. Omit to disable.
+   *
+   * Defaults when enabled: `{ borderWidth: 1, borderStyle: 'dashed', borderColor: theme.colors.border }`
+   */
+  dayEndLineStyle?: {
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted';
+    borderColor?: string;
+  };
+
+  /**
    * Headless children rendered inside BodyContext.Provider.
    *
    * Use this to mount side-effect components that need access to the

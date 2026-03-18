@@ -60,6 +60,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   renderDraggingHour,
   NowIndicatorComponent,
   renderCustomHorizontalLine,
+  dayEndLineStyle: dayEndLineStyleProp,
   showDraggingEndTime = true,
   children,
 }) => {
@@ -247,10 +248,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   }, [hourFormat, locale.meridiem, slots]);
 
   const _renderResourceItem = useCallback(
-    (item: { items: ResourceItem[]; index: number }) => {
+    (item: { items: ResourceItem[]; index: number; isDayEnd?: boolean; isDayStart?: boolean }) => {
       // In dual-axis mode, get the date for this specific item
       const dateUnix = dateResourceItems?.[item.index]?.date;
-      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} />;
+      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} isDayEnd={item.isDayEnd} isDayStart={item.isDayStart} />;
     },
     [dateResourceItems]
   );
@@ -300,6 +301,13 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       gridListRef,
       resourcePerPage,
       enableResourceScroll,
+      dayEndLineStyle: dayEndLineStyleProp
+        ? {
+            borderWidth: dayEndLineStyleProp.borderWidth ?? 1,
+            borderStyle: dayEndLineStyleProp.borderStyle ?? 'dashed',
+            borderColor: dayEndLineStyleProp.borderColor ?? '',
+          }
+        : undefined,
       zoomScale,
       counterScaleStyle,
     }),
@@ -347,6 +355,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       gridListRef,
       resourcePerPage,
       enableResourceScroll,
+      dayEndLineStyleProp,
       zoomScale,
       counterScaleStyle,
     ]
