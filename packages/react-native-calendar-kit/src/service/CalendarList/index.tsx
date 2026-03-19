@@ -170,8 +170,13 @@ export const CalendarList = React.forwardRef<
     extraScrollDataRef.current = extraScrollData;
     const onVisibleColumnChangedCb = useLatestCallback(onVisibleColumnChanged);
 
-    const handleColumnChanged = useCallback(
+    // Combine both JS-thread updates into a single runOnJS call.
+    // Previously this fired two runOnJS calls per scroll frame (~60/sec),
+    // doubling the JS thread bridge overhead during scrolling.
+    const handleScrollUpdate = useCallback(
       (offset: number) => {
+        setScrollOffset(offset);
+
         const columnWidth = itemSize / columnsPerPage;
         const startIndex = Math.floor(
           Math.round(offset / columnWidth) / columnsPerPage
@@ -193,8 +198,7 @@ export const CalendarList = React.forwardRef<
     useAnimatedReaction(
       () => scrollOffsetAnim.value,
       (offset) => {
-        runOnJS(handleColumnChanged)(offset);
-        runOnJS(setScrollOffset)(offset);
+        runOnJS(handleScrollUpdate)(offset);
       }
     );
 

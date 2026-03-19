@@ -628,60 +628,52 @@ const onSameRow = (
 
 const computeStylesForEvents = (containerEvents: OverlapEvent[]) => {
   for (const containerEvent of containerEvents) {
-    const columns =
-      containerEvent._internal.rows!.reduce(
-        (max, row) =>
-          Math.max(
-            max,
-            (row._internal.leaves ? row._internal.leaves.length : 0) + 1
-          ),
-        0
-      ) + 1;
+    // Pre-compute max columns once instead of inside reduce
+    const rows = containerEvent._internal.rows!;
+    let maxLeaves = 0;
+    for (let r = 0; r < rows.length; r++) {
+      const leafCount = rows[r]._internal.leaves?.length ?? 0;
+      if (leafCount > maxLeaves) maxLeaves = leafCount;
+    }
+    const columns = maxLeaves + 2; // +1 for row itself, +1 for container
 
     containerEvent._internal._width = 100 / columns;
 
     const noOverlap = containerEvent._internal._width;
     const overlap = Math.min(100, containerEvent._internal._width * 1.7);
-    if (
-      containerEvent._internal.rows &&
-      containerEvent._internal.rows.length > 0
-    ) {
-      containerEvent._internal.width = overlap;
-    } else {
-      containerEvent._internal.width = noOverlap;
-    }
-
+    containerEvent._internal.width = rows.length > 0 ? overlap : noOverlap;
     containerEvent._internal.xOffset = 0;
 
-    for (const rowEvent of containerEvent._internal.rows!) {
-      const availableWidth = 100 - containerEvent._internal._width;
-      rowEvent._internal._width =
-        availableWidth / ((rowEvent._internal.leaves?.length ?? 0) + 1);
+    const containerWidth = containerEvent._internal._width;
+
+    for (let r = 0; r < rows.length; r++) {
+      const rowEvent = rows[r];
+      const leaves = rowEvent._internal.leaves;
+      const leafCount = leaves?.length ?? 0;
+      const availableWidth = 100 - containerWidth;
+
+      rowEvent._internal._width = availableWidth / (leafCount + 1);
 
       const noOverlapRow = rowEvent._internal._width;
       const overlapRow = Math.min(100, rowEvent._internal._width * 1.7);
-      if (rowEvent._internal.leaves && rowEvent._internal.leaves.length > 0) {
-        rowEvent._internal.width = overlapRow;
-      } else {
-        rowEvent._internal.width = noOverlapRow;
-      }
+      rowEvent._internal.width = leafCount > 0 ? overlapRow : noOverlapRow;
+      rowEvent._internal.xOffset = containerWidth;
 
-      rowEvent._internal.xOffset = containerEvent._internal._width!;
+      if (leaves && leafCount > 0) {
+        const leafWidth = rowEvent._internal._width;
+        const rowXOffset = rowEvent._internal.xOffset;
+        const lastIndex = leafCount - 1;
 
-      if (rowEvent._internal.leaves && rowEvent._internal.leaves.length > 0) {
-        for (const leafEvent of rowEvent._internal.leaves) {
-          leafEvent._internal._width = rowEvent._internal._width!;
+        // Use index-based loop instead of for-of + indexOf (O(n) per leaf)
+        for (let li = 0; li < leafCount; li++) {
+          const leafEvent = leaves[li];
 
-          const leaves = rowEvent._internal.leaves;
-          const index = leaves.indexOf(leafEvent);
-          const noOverlapLeaf = leafEvent._internal._width;
-          const overlapLeaf = Math.min(100, leafEvent._internal._width * 1.7);
+          leafEvent._internal._width = leafWidth;
           leafEvent._internal.width =
-            index === leaves.length - 1 ? noOverlapLeaf : overlapLeaf;
-
-          leafEvent._internal.xOffset =
-            rowEvent._internal.xOffset +
-            (index + 1) * leafEvent._internal._width;
+            li === lastIndex
+              ? leafWidth // no overlap for last leaf
+              : Math.min(100, leafWidth * 1.7);
+          leafEvent._internal.xOffset = rowXOffset + (li + 1) * leafWidth;
         }
       }
     }
