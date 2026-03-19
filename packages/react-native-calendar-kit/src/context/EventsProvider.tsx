@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useImperativeHandle,
+  useRef,
 } from 'react';
 import { DEFAULT_MIN_START_DIFFERENCE } from '../constants';
 import useLazyRef from '../hooks/useLazyRef';
@@ -165,6 +166,14 @@ const EventsProvider: ForwardRefRenderFunction<
   ).current;
   const currentStartDate = useDateChangedListener();
 
+  // ── Layout cache ────────────────────────────────────────────────────
+  // populateEvents is O(n²-n³) for overlapping events. When scrolling
+  // between dates, the same day's events get re-laid-out even though
+  // they haven't changed. This cache stores results keyed by a digest
+  // of the day's events (localId + timestamps), so only genuinely
+  // changed days re-run the expensive layout algorithm.
+  const layoutCacheRef = useRef(new Map<string, PackedEvent[]>());
+
   const notifyDataChanged = useCallback(
     (date: number, offset: number = defaultOffset) => {
       const zonedDate = forceUpdateZone(date, timeZone);
@@ -203,15 +212,36 @@ const EventsProvider: ForwardRefRenderFunction<
         });
       });
       const packedRegularEvents: Record<string, PackedEvent[]> = {};
+      const newLayoutCache = new Map<string, PackedEvent[]>();
+
       regularEventMap.forEach((rEvents, day) => {
-        packedRegularEvents[day] = populateEvents(rEvents, {
-          overlap: overlapType === 'overlap',
-          minStartDifference,
-          resources,
-          overlappingConfig,
-          availableWidth: columnWidth,
-        });
+        // Build a lightweight digest from event identity fields.
+        // processEventOccurrences creates new objects each call, so we
+        // can't use reference equality — but localId + timestamps are stable.
+        let digest = String(day) + ':' + rEvents.length;
+        for (let i = 0; i < rEvents.length; i++) {
+          const e = rEvents[i];
+          digest += ':' + e.localId + ',' + e._internal.startUnix + ',' + e._internal.endUnix;
+        }
+
+        const cached = layoutCacheRef.current.get(digest);
+        if (cached) {
+          packedRegularEvents[day] = cached;
+          newLayoutCache.set(digest, cached);
+        } else {
+          const packed = populateEvents(rEvents, {
+            overlap: overlapType === 'overlap',
+            minStartDifference,
+            resources,
+            overlappingConfig,
+            availableWidth: columnWidth,
+          });
+          packedRegularEvents[day] = packed;
+          newLayoutCache.set(digest, packed);
+        }
       });
+
+      layoutCacheRef.current = newLayoutCache;
 
       // Process all-day events
       const allDayEventMap = new Map<number, EventItemInternal[]>();
