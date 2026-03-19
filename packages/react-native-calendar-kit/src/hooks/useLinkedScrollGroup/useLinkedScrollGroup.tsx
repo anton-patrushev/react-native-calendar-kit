@@ -49,7 +49,13 @@ export const useLinkedScrollGroup = (
           : event.contentOffset.x;
 
       peers.value.forEach((peer) => {
-        scrollTo(peer, event.contentOffset.x, event.contentOffset.y, false);
+        // Guard against unattached refs (e.g., CalendarBody unmounted
+        // but controller still registered in the linked scroll group).
+        // Reanimated sets the shared tag to null when a ref is detached;
+        // calling scrollTo with null crashes with "Value is null".
+        if (peer && peer.current) {
+          scrollTo(peer, event.contentOffset.x, event.contentOffset.y, false);
+        }
       });
     },
     scrollNativeEventNames
