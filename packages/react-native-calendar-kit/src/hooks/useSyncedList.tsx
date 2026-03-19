@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { runOnUI } from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY, ScrollType } from '../constants';
 import { useActions } from '../context/ActionsProvider';
@@ -37,6 +37,15 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
   }, []);
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, []);
 
   const onVisibleColumnChanged = useCallback(
     (props: {

@@ -3,6 +3,7 @@ import React, {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -253,7 +254,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     undefined
   );
   const isRecenteringRef = useRef(false);
-  const windowRecenterThreshold = windowSize ? Math.max(1, Math.floor(windowSize / 4)) : 0;
+  const pendingRecenterRef = useRef(false);
+  const recenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const calendarData = useMemo(() => {
     if (windowSize) {
@@ -387,61 +389,64 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   );
   const eventsRef = useRef<EventsRef>(null);
 
-  // Window recenter logic: when scroll settles near edge, shift window
+  // Post-recenter scroll: when the window shifts, scroll header + body to
+  // the new initialOffset (which is already correct for the new center).
+  // useLayoutEffect fires synchronously after React commits, before paint.
+  useLayoutEffect(() => {
+    if (!pendingRecenterRef.current) return;
+    pendingRecenterRef.current = false;
+
+    // Sync offsetX for linked scroll (header follows body)
+    offsetX.value = initialOffset;
+
+    // Scroll both header and body to new position instantly
+    runOnUI(() => {
+      'worklet';
+      scrollTo(dayBarListRef, initialOffset, 0, false);
+      scrollTo(gridListRef, initialOffset, 0, false);
+    })();
+
+    // Allow date tracking again
+    isRecenteringRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarData, initialOffset]);
+
+  // Window recenter logic: when scroll settles near edge, shift window.
+  // Uses a 150ms debounce to coalesce multiple scroll-end events
+  // (onScrollEndDrag + onMomentumScrollEnd can both fire).
   const onBodyMomentumEnd = useLatestCallback(() => {
     if (!windowSize || isRecenteringRef.current) return;
 
-    const visibleDatesArray = calendarData.visibleDatesArray;
-    const currentDateUnix = visibleDateUnix.current;
-    const currentIndex = visibleDatesArray.indexOf(currentDateUnix);
-    if (currentIndex === -1) return;
-
-    // For week mode: currentIndex is within visibleDatesArray (which has 7 * windowSize entries)
-    // The "page index" is currentIndex / columns
-    let currentPage: number;
-    if (isSingleDay || scrollByDay) {
-      currentPage = currentIndex;
-    } else {
-      currentPage = Math.floor(currentIndex / columns);
+    if (recenterTimerRef.current) {
+      clearTimeout(recenterTimerRef.current);
     }
+    recenterTimerRef.current = setTimeout(() => {
+      recenterTimerRef.current = null;
+      if (isRecenteringRef.current) return;
 
-    const halfWindow = Math.floor(windowSize / 2);
-    const nearLeftEdge = currentPage < windowRecenterThreshold;
-    const nearRightEdge = currentPage >= windowSize - windowRecenterThreshold;
+      const visibleDatesArray = calendarData.visibleDatesArray;
+      const currentDateUnix = visibleDateUnix.current;
+      const currentIndex = visibleDatesArray.indexOf(currentDateUnix);
+      if (currentIndex === -1) return;
 
-    if (!nearLeftEdge && !nearRightEdge) return;
+      let currentPage: number;
+      if (isSingleDay || scrollByDay) {
+        currentPage = currentIndex;
+      } else {
+        currentPage = Math.floor(currentIndex / columns);
+      }
 
-    // Recenter: shift the window so currentDate is at center
-    isRecenteringRef.current = true;
+      // Edge detection: within 1 page of either edge
+      const nearLeftEdge = currentPage < 1;
+      const nearRightEdge = currentPage >= windowSize - 1;
 
-    // 1. Scroll to center position instantly (before React re-render)
-    const centerPage = halfWindow;
-    let newOffset: number;
-    if (isResourceMode && enableResourceScroll && resources) {
-      // Resource mode: offset = centerDayIndex * resourceCount * resourceWidth
-      const resourceWidth = calendarGridWidth / resourcePerPage;
-      newOffset = centerPage * resources.length * resourceWidth;
-    } else if (isSingleDay) {
-      newOffset = centerPage * calendarGridWidth;
-    } else if (scrollByDay) {
-      newOffset = centerPage * columnWidth;
-    } else {
-      newOffset = centerPage * (columnWidth * columns);
-    }
+      if (!nearLeftEdge && !nearRightEdge) return;
 
-    runOnUI(() => {
-      'worklet';
-      scrollTo(dayBarListRef, newOffset, 0, false);
-      scrollTo(gridListRef, newOffset, 0, false);
-    })();
-
-    // 2. Update window center state → triggers calendarData recomputation
-    setWindowCenterDate(currentDateUnix);
-
-    // 3. Clear recenter flag after React processes the state update
-    requestAnimationFrame(() => {
-      isRecenteringRef.current = false;
-    });
+      // Trigger recenter — useLayoutEffect handles the scroll after React commits
+      isRecenteringRef.current = true;
+      pendingRecenterRef.current = true;
+      setWindowCenterDate(currentDateUnix);
+    }, 150);
   });
 
   const extraHeight = spaceFromTop + spaceFromBottom;
@@ -489,11 +494,10 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         (d) => Math.abs(d - targetDateUnix) < 86400000
       );
       if (!inWindow) {
-        // Shift window to center on target date, then scroll to center
+        // Shift window to center on target date.
+        // useLayoutEffect handles scroll after React commits.
         isRecenteringRef.current = true;
-        setWindowCenterDate(targetDateUnix);
-        // The initialOffset useEffect will scroll to the right position
-        // after calendarData updates. Update visibleDateUnix ahead of time.
+        pendingRecenterRef.current = true;
         visibleDateUnix.current = targetDateUnix;
         visibleDateUnixAnim.value = targetDateUnix;
         visibleDateRef.current?.updateVisibleDate(targetDateUnix);
@@ -501,9 +505,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         const newDate = dateTimeToISOString(dateObj);
         onDateChanged?.(newDate);
         onChange?.(newDate);
-        requestAnimationFrame(() => {
-          isRecenteringRef.current = false;
-        });
+        setWindowCenterDate(targetDateUnix);
 
         if (props?.hourScroll) {
           const minutes = date.hour * 60 + date.minute;

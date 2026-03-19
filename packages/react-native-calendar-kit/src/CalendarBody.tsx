@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -145,14 +145,31 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
-  const onMomentumScrollEnd = useCallback(() => {
-    onBodyMomentumEnd?.();
+  // Merge onMomentumScrollEnd and onScrollEndDrag into a single debounced
+  // handler. Both events can fire for the same gesture (drag end → momentum end),
+  // so the 50ms debounce coalesces them into one recenter check.
+  const scrollEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (scrollEndTimerRef.current) {
+        clearTimeout(scrollEndTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleScrollEnd = useCallback(() => {
+    if (scrollEndTimerRef.current) {
+      clearTimeout(scrollEndTimerRef.current);
+    }
+    scrollEndTimerRef.current = setTimeout(() => {
+      scrollEndTimerRef.current = null;
+      onBodyMomentumEnd?.();
+    }, 50);
   }, [onBodyMomentumEnd]);
 
-  const onScrollEndDrag = useCallback(() => {
-    // Also trigger recenter check when user lifts finger without momentum
-    onBodyMomentumEnd?.();
-  }, [onBodyMomentumEnd]);
+  const onMomentumScrollEnd = handleScrollEnd;
+  const onScrollEndDrag = handleScrollEnd;
 
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({

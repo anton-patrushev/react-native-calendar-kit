@@ -143,6 +143,12 @@ export const CalendarList = React.forwardRef<
 
     const totalSize = count * itemSize;
 
+    // With small page counts (e.g. 5-page windowed mode), all items are always
+    // in the visible range. Skip throttled virtualization updates entirely to
+    // eliminate per-frame JS-thread re-renders during scroll.
+    const isSmallCountRef = useRef(count <= 20);
+    isSmallCountRef.current = count <= 20;
+
     // Throttle virtualization updates to reduce JS-thread re-renders during scroll.
     // handleColumnChanged (visible date tracking) still fires every frame.
     const flushScrollOffset = useCallback(() => {
@@ -164,6 +170,10 @@ export const CalendarList = React.forwardRef<
     const visibleRange = useMemo(() => {
       if (count === 0) {
         return { start: 0, end: 0 };
+      }
+      // For small page counts, all items are always visible — no virtualization needed
+      if (count <= 20) {
+        return { start: 0, end: count - 1 };
       }
 
       const buffer = drawDistance;
@@ -215,7 +225,10 @@ export const CalendarList = React.forwardRef<
     const updateScrollOffset = useCallback(
       (offset: number) => {
         scrollOffsetRef.current = offset;
-        throttledUpdateVisibleRange();
+        // Skip re-renders for small page counts: all items are always in visible range
+        if (!isSmallCountRef.current) {
+          throttledUpdateVisibleRange();
+        }
       },
       [throttledUpdateVisibleRange]
     );
