@@ -339,12 +339,12 @@ export const CalendarList = React.forwardRef<
         if (offset !== undefined) {
           scrollOffsetRef.current = offset ?? 0;
           flushScrollOffset();
-          setTimeout(() => {
-            scrollViewRef.current?.scrollTo({
-              x: offset,
-              animated: false,
-            });
-          }, 0);
+          // Scroll synchronously in the layout effect (before paint) so
+          // the recenter is visually atomic — no 1-frame flash.
+          scrollViewRef.current?.scrollTo({
+            x: offset,
+            animated: false,
+          });
         }
       }
     }, [initialScrollIndex, count, getItemPosition, initialOffset, flushScrollOffset]);
