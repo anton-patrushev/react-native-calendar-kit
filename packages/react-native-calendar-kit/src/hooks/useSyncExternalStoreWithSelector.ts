@@ -1,4 +1,3 @@
-import is from 'lodash.isequal';
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 
 type InstRef<T> = {
@@ -51,7 +50,11 @@ export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
       const prevSnapshot = memoizedSnapshot;
       const prevSelection = memoizedSelection;
 
-      if (is(prevSnapshot, nextSnapshot)) {
+      // Use reference equality for snapshot comparison instead of deep equality.
+      // This is O(1) vs O(n) for deep comparison of the entire store state.
+      // When the snapshot reference changes, we run the selector and rely on
+      // the isEqual callback to compare selections efficiently.
+      if (Object.is(prevSnapshot, nextSnapshot)) {
         return prevSelection;
       }
 

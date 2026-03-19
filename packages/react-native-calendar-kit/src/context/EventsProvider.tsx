@@ -19,6 +19,67 @@ import type {
   PackedEvent,
   ResourceItem,
 } from '../types';
+
+// ── Selection equality helpers ──────────────────────────────────────────
+// These enable useSyncExternalStoreWithSelector to skip re-renders when
+// the selector produces structurally identical output (same array elements
+// by reference, same counts). Much cheaper than deep-comparing the entire
+// store snapshot.
+
+const isPackedEventArrayEqual = (a: PackedEvent[], b: PackedEvent[]) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+};
+
+const isRegularEventsSelectionEqual = (
+  a: { data: PackedEvent[] },
+  b: { data: PackedEvent[] }
+) => isPackedEventArrayEqual(a.data, b.data);
+
+const isAllDayEventsSelectionEqual = (
+  a: { data: PackedAllDayEvent[]; eventCounts: Record<string, number> },
+  b: { data: PackedAllDayEvent[]; eventCounts: Record<string, number> }
+) => {
+  if (a.data.length !== b.data.length) return false;
+  for (let i = 0; i < a.data.length; i++) {
+    if (a.data[i] !== b.data[i]) return false;
+  }
+  const keysA = Object.keys(a.eventCounts);
+  const keysB = Object.keys(b.eventCounts);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (a.eventCounts[key] !== b.eventCounts[key]) return false;
+  }
+  return true;
+};
+
+const isAllDayEventsByDaySelectionEqual = (
+  a: { data: PackedAllDayEvent[]; eventCounts: number },
+  b: { data: PackedAllDayEvent[]; eventCounts: number }
+) => {
+  if (a.eventCounts !== b.eventCounts) return false;
+  if (a.data.length !== b.data.length) return false;
+  for (let i = 0; i < a.data.length; i++) {
+    if (a.data[i] !== b.data[i]) return false;
+  }
+  return true;
+};
+
+const isMonthEventsSelectionEqual = (
+  a: { data: Record<string, PackedEvent[]> },
+  b: { data: Record<string, PackedEvent[]> }
+) => {
+  const keysA = Object.keys(a.data);
+  const keysB = Object.keys(b.data);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (a.data[key] !== b.data[key]) return false;
+  }
+  return true;
+};
 import { forceUpdateZone, parseDateTime } from '../utils/dateUtils';
 import {
   divideAllDayEvents,
@@ -277,7 +338,8 @@ export const useAllDayEvents = (
   const state = useSyncExternalStoreWithSelector(
     eventsContext.subscribe,
     eventsContext.getState,
-    selectorByDate
+    selectorByDate,
+    isAllDayEventsSelectionEqual
   );
   return state;
 };
@@ -302,7 +364,8 @@ export const useAllDayEventsByDay = (date: number) => {
   const state = useSyncExternalStoreWithSelector(
     eventsContext.subscribe,
     eventsContext.getState,
-    selectorByDate
+    selectorByDate,
+    isAllDayEventsByDaySelectionEqual
   );
   return state;
 };
@@ -351,7 +414,8 @@ export const useRegularEvents = (
   const state = useSyncExternalStoreWithSelector(
     eventsContext.subscribe,
     eventsContext.getState,
-    selectorByDate
+    selectorByDate,
+    isRegularEventsSelectionEqual
   );
   return state;
 };
@@ -430,7 +494,8 @@ export const useMonthEvents = (
   const state = useSyncExternalStoreWithSelector(
     eventsContext.subscribe,
     eventsContext.getState,
-    selectorByDate
+    selectorByDate,
+    isMonthEventsSelectionEqual
   );
   return state;
 };

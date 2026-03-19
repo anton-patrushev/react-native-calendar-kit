@@ -1,4 +1,3 @@
-import isEqual from 'lodash.isequal';
 import type { FC } from 'react';
 import React, { useCallback, useMemo } from 'react';
 import {
@@ -328,10 +327,37 @@ const EventItem: FC<EventItemProps> = ({
   );
 };
 
+// Field-level comparison instead of lodash.isEqual deep comparison.
+// For 100 events, this saves 100 deep object traversals per store update.
+const areEventsEqual = (a: PackedEvent, b: PackedEvent) => {
+  if (a === b) return true;
+  const ai = a._internal;
+  const bi = b._internal;
+  return (
+    a.localId === b.localId &&
+    a.color === b.color &&
+    a.titleColor === b.titleColor &&
+    a.title === b.title &&
+    a.draggable === b.draggable &&
+    ai.startUnix === bi.startUnix &&
+    ai.endUnix === bi.endUnix &&
+    ai.duration === bi.duration &&
+    ai.startMinutes === bi.startMinutes &&
+    ai.widthPercentage === bi.widthPercentage &&
+    ai.xOffsetPercentage === bi.xOffsetPercentage &&
+    ai.index === bi.index &&
+    ai.total === bi.total &&
+    ai.columnSpan === bi.columnSpan &&
+    ai.resourceIndex === bi.resourceIndex &&
+    ai.zIndex === bi.zIndex &&
+    ai.stackLevel === bi.stackLevel
+  );
+};
+
 export default React.memo(EventItem, (prev, next) => {
   return (
-    isEqual(prev.event, next.event) &&
-    isEqual(prev.visibleDates, next.visibleDates) &&
+    areEventsEqual(prev.event, next.event) &&
+    prev.visibleDates === next.visibleDates &&
     prev.startUnix === next.startUnix &&
     prev.renderEvent === next.renderEvent &&
     prev.isDragging === next.isDragging &&

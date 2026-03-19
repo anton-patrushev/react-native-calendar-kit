@@ -17,7 +17,7 @@ const Events: FC<{
   startUnix: number;
   visibleDates: Record<string, { diffDays: number; unix: number }>;
   resources?: ResourceItem[];
-}> = ({ startUnix, visibleDates, resources }) => {
+}> = React.memo(({ startUnix, visibleDates, resources }) => {
   const totalResources = resources?.length;
   const { renderEvent, numberOfDays, columnWidth, enableResourceScroll } =
     useBody();
@@ -130,6 +130,8 @@ const Events: FC<{
       {events.map(_renderEvent)}
     </View>
   );
-};
+});
+
+Events.displayName = 'Events';
 
 export default Events;

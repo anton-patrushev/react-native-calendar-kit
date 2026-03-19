@@ -586,20 +586,26 @@ function overlapSort(events: EventItemInternal[]): EventItemInternal[] {
     return b._internal.endUnix - a._internal.endUnix;
   });
 
-  const sorted = [];
-  while (sortedByTime.length > 0) {
-    const event = sortedByTime.shift()!;
-    sorted.push(event);
+  // Use a flag array instead of shift() (O(n)) and splice() (O(n)).
+  // Both operations move all subsequent elements; the flag array avoids this.
+  const used = new Uint8Array(sortedByTime.length);
+  const sorted: EventItemInternal[] = [];
 
-    for (let i = 0; i < sortedByTime.length; i++) {
-      const tempEvent = sortedByTime[i];
-      if (event._internal.endUnix > tempEvent._internal.startUnix) {
+  for (let i = 0; i < sortedByTime.length; i++) {
+    if (used[i]) continue;
+
+    const event = sortedByTime[i];
+    sorted.push(event);
+    used[i] = 1;
+
+    // Find the first non-overlapping, unused event after this one
+    for (let j = i + 1; j < sortedByTime.length; j++) {
+      if (used[j]) continue;
+      if (event._internal.endUnix > sortedByTime[j]._internal.startUnix) {
         continue;
       }
-      if (i > 0) {
-        const e = sortedByTime.splice(i, 1)[0];
-        sorted.push(e);
-      }
+      sorted.push(sortedByTime[j]);
+      used[j] = 1;
       break;
     }
   }
