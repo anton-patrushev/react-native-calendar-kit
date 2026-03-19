@@ -554,6 +554,19 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    */
   pagesPerSide?: number;
 
+  /**
+   * When set, enables dynamic windowed scrolling. Instead of pre-computing
+   * the full minDate→maxDate range, the calendar maintains a small window
+   * of this many pages centered on the current visible date, and recenters
+   * when the user scrolls near the edge.
+   *
+   * This dramatically reduces memory usage and JS-thread work for large
+   * date ranges. Typical value: `9` (4 pages each side + current).
+   *
+   * When not set, the classic full-range behavior is used.
+   */
+  windowSize?: number;
+
   /** Allow drag to create event */
   allowDragToCreate?: boolean;
 

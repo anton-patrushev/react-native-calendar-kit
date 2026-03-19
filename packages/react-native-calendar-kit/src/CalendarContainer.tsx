@@ -70,6 +70,7 @@ import {
   clampValues,
   findNearestNumber,
   prepareCalendarRange,
+  prepareCalendarWindow,
 } from './utils/utils';
 
 // Helper component to expose drag actions to parent
@@ -169,6 +170,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     allowDragToOtherResources = true,
     showTapFeedback = false,
     tapFeedbackInterval,
+    windowSize,
   },
   ref
 ) => {
@@ -245,18 +247,45 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     hapticService.setEnabled(useHaptic);
   }, [hapticService, useHaptic]);
 
-  const calendarData = useMemo(
-    () =>
-      prepareCalendarRange({
-        minDate,
-        maxDate,
+  // Window center state: tracks which date the window is centered on.
+  // Only used when windowSize is set.
+  const [windowCenterDate, setWindowCenterDate] = useState<number | undefined>(
+    undefined
+  );
+  const isRecenteringRef = useRef(false);
+  const windowRecenterThreshold = windowSize ? Math.max(1, Math.floor(windowSize / 4)) : 0;
+
+  const calendarData = useMemo(() => {
+    if (windowSize) {
+      const centerDate = windowCenterDate ?? initialDate;
+      return prepareCalendarWindow({
+        centerDate,
+        windowSize,
         firstDay,
         isSingleDay,
         hideWeekDays,
         timeZone,
-      }),
-    [minDate, maxDate, firstDay, isSingleDay, hideWeekDays, timeZone]
-  );
+      });
+    }
+    return prepareCalendarRange({
+      minDate,
+      maxDate,
+      firstDay,
+      isSingleDay,
+      hideWeekDays,
+      timeZone,
+    });
+  }, [
+    windowSize,
+    windowCenterDate,
+    initialDate,
+    minDate,
+    maxDate,
+    firstDay,
+    isSingleDay,
+    hideWeekDays,
+    timeZone,
+  ]);
 
   const slots = useMemo(
     () => calculateSlots(start, end, timeInterval),
@@ -358,6 +387,60 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   );
   const eventsRef = useRef<EventsRef>(null);
 
+  // Window recenter logic: when scroll settles near edge, shift window
+  const onBodyMomentumEnd = useLatestCallback(() => {
+    if (!windowSize || isRecenteringRef.current) return;
+    if (isResourceMode && enableResourceScroll) return; // resource mode has its own scrolling
+
+    const visibleDatesArray = calendarData.visibleDatesArray;
+    const currentDateUnix = visibleDateUnix.current;
+    const currentIndex = visibleDatesArray.indexOf(currentDateUnix);
+    if (currentIndex === -1) return;
+
+    // For week mode: currentIndex is within visibleDatesArray (which has 7 * windowSize entries)
+    // The "page index" is currentIndex / columns
+    let currentPage: number;
+    if (isSingleDay || scrollByDay) {
+      currentPage = currentIndex;
+    } else {
+      currentPage = Math.floor(currentIndex / columns);
+    }
+
+    const halfWindow = Math.floor(windowSize / 2);
+    const nearLeftEdge = currentPage < windowRecenterThreshold;
+    const nearRightEdge = currentPage >= windowSize - windowRecenterThreshold;
+
+    if (!nearLeftEdge && !nearRightEdge) return;
+
+    // Recenter: shift the window so currentDate is at center
+    isRecenteringRef.current = true;
+
+    // 1. Scroll to center position instantly (before React re-render)
+    const centerPage = halfWindow;
+    let newOffset: number;
+    if (isSingleDay) {
+      newOffset = centerPage * calendarGridWidth;
+    } else if (scrollByDay) {
+      newOffset = centerPage * columnWidth;
+    } else {
+      newOffset = centerPage * (columnWidth * columns);
+    }
+
+    runOnUI(() => {
+      'worklet';
+      scrollTo(dayBarListRef, newOffset, 0, false);
+      scrollTo(gridListRef, newOffset, 0, false);
+    })();
+
+    // 2. Update window center state → triggers calendarData recomputation
+    setWindowCenterDate(currentDateUnix);
+
+    // 3. Clear recenter flag after React processes the state update
+    requestAnimationFrame(() => {
+      isRecenteringRef.current = false;
+    });
+  });
+
   const extraHeight = spaceFromTop + spaceFromBottom;
   const maxTimelineHeight = totalSlots * maxTimeIntervalHeight + extraHeight;
 
@@ -396,6 +479,44 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     if (!scrollByDay) {
       targetDateUnix = startOfWeek(isoDate, firstDay).toMillis();
     }
+
+    // If windowed mode and target is outside current window, shift the window
+    if (windowSize) {
+      const inWindow = calendarData.visibleDatesArray.some(
+        (d) => Math.abs(d - targetDateUnix) < 86400000
+      );
+      if (!inWindow) {
+        // Shift window to center on target date, then scroll to center
+        isRecenteringRef.current = true;
+        setWindowCenterDate(targetDateUnix);
+        // The initialOffset useEffect will scroll to the right position
+        // after calendarData updates. Update visibleDateUnix ahead of time.
+        visibleDateUnix.current = targetDateUnix;
+        visibleDateUnixAnim.value = targetDateUnix;
+        visibleDateRef.current?.updateVisibleDate(targetDateUnix);
+        const dateObj = forceUpdateZone(targetDateUnix, timeZone);
+        const newDate = dateTimeToISOString(dateObj);
+        onDateChanged?.(newDate);
+        onChange?.(newDate);
+        requestAnimationFrame(() => {
+          isRecenteringRef.current = false;
+        });
+
+        if (props?.hourScroll) {
+          const minutes = date.hour * 60 + date.minute;
+          const position =
+            (minutes * minuteHeight.value - startOffset.value) * zoomScale.value;
+          const scrollOffset = scrollVisibleHeight.current / 2;
+          const animatedHour =
+            props?.animatedHour !== undefined ? props.animatedHour : true;
+          runOnUI(() => {
+            scrollTo(verticalListRef, 0, position - scrollOffset, animatedHour);
+          })();
+        }
+        return;
+      }
+    }
+
     const visibleDates = calendarData.visibleDatesArray;
     const nearestUnix = findNearestNumber(visibleDates, targetDateUnix);
     const visibleDayIndex = visibleDates.indexOf(nearestUnix);
@@ -1055,6 +1176,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       zoomScale,
       minZoomScale,
       maxZoomScale,
+      onBodyMomentumEnd: windowSize ? onBodyMomentumEnd : undefined,
+      isRecenteringRef: windowSize ? isRecenteringRef : undefined,
     }),
     [
       calendarLayout,
@@ -1115,6 +1238,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       zoomScale,
       minZoomScale,
       maxZoomScale,
+      windowSize,
+      onBodyMomentumEnd,
     ]
   );
 

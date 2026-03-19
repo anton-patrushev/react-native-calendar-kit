@@ -134,6 +134,132 @@ export const prepareCalendarRange = (
   };
 };
 
+type CalendarWindowOptions = {
+  centerDate: DateType;
+  windowSize: number;
+  firstDay: WeekdayNumbers;
+  isSingleDay: boolean;
+  hideWeekDays?: WeekdayNumbers[];
+  timeZone?: string;
+};
+
+/**
+ * Creates a small DataByMode window centered on a given date.
+ * Instead of computing the full min→max range (which can be thousands of pages),
+ * this produces a fixed-size window (e.g. 9 pages) that can be recentered
+ * as the user scrolls, giving infinite-scroll UX with minimal overhead.
+ */
+export const prepareCalendarWindow = (
+  props: CalendarWindowOptions
+): DataByMode => {
+  const {
+    centerDate,
+    windowSize,
+    firstDay,
+    isSingleDay,
+    hideWeekDays,
+    timeZone,
+  } = props;
+
+  const center = parseDateTime(
+    parseDateTime(centerDate, { zone: timeZone }).toISODate()
+  );
+  const halfWindow = Math.floor(windowSize / 2);
+
+  if (isSingleDay) {
+    const visibleDates: Record<
+      string,
+      { index: number; unix: number; weekday: WeekdayNumbers }
+    > = {};
+    const visibleDatesArray: number[] = [];
+
+    // Start well before center to account for hidden weekdays
+    let currentDt = center.minus({ days: halfWindow + (hideWeekDays?.length ?? 0) * 2 });
+    let index = 0;
+    let centerFound = false;
+    let pagesBeforeCenter = 0;
+
+    // Build a large-enough candidate pool, then slice the window
+    const candidates: { unix: number; weekday: WeekdayNumbers }[] = [];
+    const totalCandidatesNeeded = windowSize + halfWindow * 2;
+    while (candidates.length < totalCandidatesNeeded) {
+      const weekday = currentDt.weekday as WeekdayNumbers;
+      if (!hideWeekDays?.includes(weekday)) {
+        candidates.push({ unix: currentDt.toMillis(), weekday });
+      }
+      currentDt = currentDt.plus({ days: 1 });
+    }
+
+    // Find center in candidates
+    const centerUnix = center.toMillis();
+    let centerIdx = candidates.findIndex((c) => c.unix === centerUnix);
+    if (centerIdx === -1) {
+      // Find nearest
+      centerIdx = candidates.reduce((best, c, i) =>
+        Math.abs(c.unix - centerUnix) < Math.abs(candidates[best]!.unix - centerUnix) ? i : best, 0);
+    }
+
+    // Slice window around center
+    const startIdx = Math.max(0, centerIdx - halfWindow);
+    const windowSlice = candidates.slice(startIdx, startIdx + windowSize);
+
+    for (const item of windowSlice) {
+      visibleDates[item.unix] = { index, unix: item.unix, weekday: item.weekday };
+      visibleDatesArray.push(item.unix);
+      index++;
+    }
+
+    return {
+      count: visibleDatesArray.length,
+      minDateUnix: visibleDatesArray[0]!,
+      maxDateUnix: visibleDatesArray[visibleDatesArray.length - 1]!,
+      originalMinDateUnix: visibleDatesArray[0]!,
+      originalMaxDateUnix: visibleDatesArray[visibleDatesArray.length - 1]!,
+      visibleDates,
+      visibleDatesArray,
+      diffMinDays: 0,
+      diffMaxDays: 0,
+    };
+  }
+
+  // Week mode: windowSize weeks centered on centerDate's week
+  const centerWeekStart = startOfWeek(center, firstDay);
+  const windowStart = centerWeekStart.minus({ weeks: halfWindow });
+  const windowEnd = windowStart.plus({ weeks: windowSize });
+
+  const visibleDates: Record<
+    string,
+    { index: number; unix: number; weekday: WeekdayNumbers }
+  > = {};
+  const visibleDatesArray: number[] = [];
+
+  let currentDt = windowStart;
+  let index = 0;
+
+  while (currentDt.toMillis() < windowEnd.toMillis()) {
+    const weekday = currentDt.weekday as WeekdayNumbers;
+    if (!hideWeekDays?.includes(weekday)) {
+      const unix = currentDt.toMillis();
+      visibleDates[unix] = { index, unix, weekday };
+      visibleDatesArray.push(unix);
+      index++;
+    }
+    currentDt = currentDt.plus({ days: 1 });
+  }
+
+  return {
+    count: windowSize,
+    minDateUnix: windowStart.toMillis(),
+    maxDateUnix: windowEnd.toMillis(),
+    originalMinDateUnix: windowStart.toMillis(),
+    originalMaxDateUnix: windowEnd.toMillis(),
+    visibleDates,
+    visibleDatesArray,
+    diffMinDays: 0,
+    diffMaxDays: 0,
+  };
+};
+
 export const findNearestNumber = (
   numbers: number[],
   target: number

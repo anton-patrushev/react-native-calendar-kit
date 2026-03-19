@@ -114,6 +114,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     daySnapOffsets,
     handleResourceScrollOffsetChange,
     zoomScale,
+    onBodyMomentumEnd,
   } = useCalendar();
   const {
     onTouchStart,
@@ -143,6 +144,15 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     },
     [linkedOnMomentumScrollBegin, scrollProps]
   );
+
+  const onMomentumScrollEnd = useCallback(() => {
+    onBodyMomentumEnd?.();
+  }, [onBodyMomentumEnd]);
+
+  const onScrollEndDrag = useCallback(() => {
+    // Also trigger recenter check when user lifts finger without momentum
+    onBodyMomentumEnd?.();
+  }, [onBodyMomentumEnd]);
 
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({
@@ -475,6 +485,8 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                       {...scrollProps}
                       onScrollBeginDrag={onScrollBeginDrag}
                       onMomentumScrollBegin={onMomentumScrollBegin}
+                      onMomentumScrollEnd={onMomentumScrollEnd}
+                      onScrollEndDrag={onScrollEndDrag}
                       onLoad={onLoad}
                       onTouchStart={onTouchStart}
                       onWheel={onWheel}

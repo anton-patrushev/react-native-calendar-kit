@@ -17,6 +17,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
     visibleWeeks,
     linkedScrollGroup,
     hapticService,
+    isRecenteringRef,
   } = useCalendar();
   const currentUnix = useDateChangedListener();
   const notifyDateChanged = useNotifyDateChanged();
@@ -45,6 +46,9 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
       offset: number;
       extraScrollData: Record<string, any>;
     }) => {
+      // Skip date tracking during window recenter to avoid stale lookups
+      if (isRecenteringRef?.current) return;
+
       const { index: pageIndex, column, columns, extraScrollData } = props;
       const { visibleColumns, visibleDates } = extraScrollData;
 
@@ -123,6 +127,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
       onDateChanged,
       notifyDateChanged,
       hapticService,
+      isRecenteringRef,
     ]
   );
 

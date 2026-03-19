@@ -5,7 +5,6 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react';
 import {
   GestureResponderEvent,
@@ -137,10 +136,30 @@ export const CalendarList = React.forwardRef<
     ref
   ) => {
     const scrollViewRef = useRef<ScrollView>(null);
-    const [scrollOffset, setScrollOffset] = useState(initialOffset ?? 0);
+    const scrollOffsetRef = useRef(initialOffset ?? 0);
+    const [visibleRangeTick, setVisibleRangeTick] = React.useState(0);
+    const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
     const isLoaded = useRef(false);
 
     const totalSize = count * itemSize;
+
+    // Throttle virtualization updates to reduce JS-thread re-renders during scroll.
+    // handleColumnChanged (visible date tracking) still fires every frame.
+    const flushScrollOffset = useCallback(() => {
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+      setVisibleRangeTick((n) => n + 1);
+    }, []);
+
+    const throttledUpdateVisibleRange = useCallback(() => {
+      if (throttleTimerRef.current !== null) return;
+      throttleTimerRef.current = setTimeout(() => {
+        throttleTimerRef.current = null;
+        setVisibleRangeTick((n) => n + 1);
+      }, 150);
+    }, []);
 
     const visibleRange = useMemo(() => {
       if (count === 0) {
@@ -148,12 +167,15 @@ export const CalendarList = React.forwardRef<
       }
 
       const buffer = drawDistance;
-      const scrollStart = Math.max(0, scrollOffset - buffer);
-      const scrollEnd = scrollOffset + itemSize + buffer;
+      const currentOffset = scrollOffsetRef.current;
+      const scrollStart = Math.max(0, currentOffset - buffer);
+      const scrollEnd = currentOffset + itemSize + buffer;
       const startIndex = Math.max(0, Math.floor(scrollStart / itemSize));
       const endIndex = Math.min(count - 1, Math.floor(scrollEnd / itemSize));
       return { start: startIndex, end: endIndex };
-    }, [count, scrollOffset, drawDistance, itemSize]);
+      // visibleRangeTick forces recalculation on throttled updates
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [count, visibleRangeTick, drawDistance, itemSize]);
 
     const getItemPosition = useCallback(
       (index: number) => {
@@ -190,11 +212,19 @@ export const CalendarList = React.forwardRef<
       [itemSize, columnsPerPage, onVisibleColumnChangedCb]
     );
 
+    const updateScrollOffset = useCallback(
+      (offset: number) => {
+        scrollOffsetRef.current = offset;
+        throttledUpdateVisibleRange();
+      },
+      [throttledUpdateVisibleRange]
+    );
+
     useAnimatedReaction(
       () => scrollOffsetAnim.value,
       (offset) => {
         runOnJS(handleColumnChanged)(offset);
-        runOnJS(setScrollOffset)(offset);
+        runOnJS(updateScrollOffset)(offset);
       }
     );
 
@@ -232,7 +262,7 @@ export const CalendarList = React.forwardRef<
             const columnWidth = itemSize / columnsPerPage;
             maxOffset = totalSize - columnWidth * visibleColumns;
           }
-          return offset >= 0 && offset <= maxOffset && offset !== scrollOffset;
+          return offset >= 0 && offset <= maxOffset && offset !== scrollOffsetRef.current;
         },
       }),
       [
@@ -240,9 +270,25 @@ export const CalendarList = React.forwardRef<
         count,
         getItemPosition,
         itemSize,
-        scrollOffset,
         totalSize,
       ]
+    );
+
+    // Flush virtualization range immediately when scroll settles
+    const handleMomentumScrollEnd = useCallback(
+      (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        flushScrollOffset();
+        onMomentumScrollEnd?.(event);
+      },
+      [flushScrollOffset, onMomentumScrollEnd]
+    );
+
+    const handleScrollEndDrag = useCallback(
+      (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        flushScrollOffset();
+        onScrollEndDrag?.(event);
+      },
+      [flushScrollOffset, onScrollEndDrag]
     );
 
     useLayoutEffect(() => {
@@ -253,6 +299,8 @@ export const CalendarList = React.forwardRef<
           offset = getItemPosition(targetIndex);
         }
         if (offset !== undefined) {
+          scrollOffsetRef.current = offset ?? 0;
+          flushScrollOffset();
           setTimeout(() => {
             scrollViewRef.current?.scrollTo({
               x: offset,
@@ -261,7 +309,7 @@ export const CalendarList = React.forwardRef<
           }, 0);
         }
       }
-    }, [initialScrollIndex, count, getItemPosition, initialOffset]);
+    }, [initialScrollIndex, count, getItemPosition, initialOffset, flushScrollOffset]);
 
     useEffect(() => {
       setTimeout(() => {
@@ -284,9 +332,9 @@ export const CalendarList = React.forwardRef<
         contentContainerStyle={[contentContainerStyle, { width: totalSize }]}
         onScroll={onScroll}
         onScrollBeginDrag={onScrollBeginDrag}
-        onScrollEndDrag={onScrollEndDrag}
+        onScrollEndDrag={handleScrollEndDrag}
         onMomentumScrollBegin={onMomentumScrollBegin}
-        onMomentumScrollEnd={onMomentumScrollEnd}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
         onLayout={onLayout}
         contentOffset={{ x: initialOffset ?? 0, y: 0 }}
         scrollEventThrottle={scrollEventThrottle}

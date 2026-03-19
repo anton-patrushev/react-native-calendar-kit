@@ -73,6 +73,12 @@ export interface CalendarContextProps {
   minZoomScale: number;
   /** Maximum zoom scale: maxTimeIntervalHeight / initialTimeIntervalHeight. */
   maxZoomScale: number;
+
+  /** Called by CalendarBody when momentum scroll ends. Used for window recentering. */
+  onBodyMomentumEnd?: () => void;
+
+  /** Ref that is true during window recenter. Consumers should skip date updates. */
+  isRecenteringRef?: React.RefObject<boolean>;
 }
 
 export const CalendarContext = React.createContext<
