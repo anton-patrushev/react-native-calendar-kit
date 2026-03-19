@@ -33,6 +33,9 @@ interface CalendarListProps {
   keyExtractor?: (item: number, index: number) => string;
   itemSize: number;
   drawDistance?: number;
+  /** Number of items to render around the current visible item for small counts
+   *  (count <= 20). Default: 1 (renders prev + current + next = 3 items). */
+  renderAhead?: number;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   onLayout?: (event: LayoutChangeEvent) => void;
   style?: any;
@@ -132,6 +135,7 @@ export const CalendarList = React.forwardRef<
       onScrollEndDrag,
       onWheel,
       decelerationRate,
+      renderAhead = 1,
     },
     ref
   ) => {
@@ -143,11 +147,14 @@ export const CalendarList = React.forwardRef<
 
     const totalSize = count * itemSize;
 
-    // With small page counts (e.g. 5-page windowed mode), all items are always
-    // in the visible range. Skip throttled virtualization updates entirely to
-    // eliminate per-frame JS-thread re-renders during scroll.
+    // With small page counts (e.g. 5-page windowed mode), only render
+    // ±renderAhead items around the current page. The rest are empty
+    // placeholders (no rendering cost). Re-render only on page change.
     const isSmallCountRef = useRef(count <= 20);
     isSmallCountRef.current = count <= 20;
+    const lastPageRef = useRef(-1);
+    const itemSizeRef = useRef(itemSize);
+    itemSizeRef.current = itemSize;
 
     // Throttle virtualization updates to reduce JS-thread re-renders during scroll.
     // handleColumnChanged (visible date tracking) still fires every frame.
@@ -155,6 +162,13 @@ export const CalendarList = React.forwardRef<
       if (throttleTimerRef.current) {
         clearTimeout(throttleTimerRef.current);
         throttleTimerRef.current = null;
+      }
+      // Sync page tracking so the next animated-reaction update doesn't
+      // immediately trigger another visibleRange recalc.
+      if (isSmallCountRef.current && itemSizeRef.current > 0) {
+        lastPageRef.current = Math.round(
+          scrollOffsetRef.current / itemSizeRef.current
+        );
       }
       setVisibleRangeTick((n) => n + 1);
     }, []);
@@ -171,9 +185,14 @@ export const CalendarList = React.forwardRef<
       if (count === 0) {
         return { start: 0, end: 0 };
       }
-      // For small page counts, all items are always visible — no virtualization needed
+      // For small page counts (windowed mode), only render ±renderAhead items
+      // around the current page. Non-rendered pages are empty placeholders.
       if (count <= 20) {
-        return { start: 0, end: count - 1 };
+        const currentPage = Math.round(scrollOffsetRef.current / itemSize);
+        return {
+          start: Math.max(0, currentPage - renderAhead),
+          end: Math.min(count - 1, currentPage + renderAhead),
+        };
       }
 
       const buffer = drawDistance;
@@ -185,7 +204,7 @@ export const CalendarList = React.forwardRef<
       return { start: startIndex, end: endIndex };
       // visibleRangeTick forces recalculation on throttled updates
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [count, visibleRangeTick, drawDistance, itemSize]);
+    }, [count, visibleRangeTick, drawDistance, itemSize, renderAhead]);
 
     const getItemPosition = useCallback(
       (index: number) => {
@@ -225,8 +244,14 @@ export const CalendarList = React.forwardRef<
     const updateScrollOffset = useCallback(
       (offset: number) => {
         scrollOffsetRef.current = offset;
-        // Skip re-renders for small page counts: all items are always in visible range
-        if (!isSmallCountRef.current) {
+        if (isSmallCountRef.current) {
+          // Only re-render when the current page changes (not every frame)
+          const currentPage = Math.round(offset / itemSizeRef.current);
+          if (currentPage !== lastPageRef.current) {
+            lastPageRef.current = currentPage;
+            setVisibleRangeTick((n) => n + 1);
+          }
+        } else {
           throttledUpdateVisibleRange();
         }
       },

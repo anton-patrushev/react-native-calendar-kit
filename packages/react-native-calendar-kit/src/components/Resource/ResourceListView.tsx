@@ -221,6 +221,7 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
           onTouchStart={onTouchStart}
           onWheel={onWheel}
           decelerationRate="fast"
+          renderAhead={resourcePerPage + 1}
         />
         {overlayElement}
       </View>
