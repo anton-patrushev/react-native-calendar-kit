@@ -390,7 +390,6 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   // Window recenter logic: when scroll settles near edge, shift window
   const onBodyMomentumEnd = useLatestCallback(() => {
     if (!windowSize || isRecenteringRef.current) return;
-    if (isResourceMode && enableResourceScroll) return; // resource mode has its own scrolling
 
     const visibleDatesArray = calendarData.visibleDatesArray;
     const currentDateUnix = visibleDateUnix.current;
@@ -418,7 +417,11 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     // 1. Scroll to center position instantly (before React re-render)
     const centerPage = halfWindow;
     let newOffset: number;
-    if (isSingleDay) {
+    if (isResourceMode && enableResourceScroll && resources) {
+      // Resource mode: offset = centerDayIndex * resourceCount * resourceWidth
+      const resourceWidth = calendarGridWidth / resourcePerPage;
+      newOffset = centerPage * resources.length * resourceWidth;
+    } else if (isSingleDay) {
       newOffset = centerPage * calendarGridWidth;
     } else if (scrollByDay) {
       newOffset = centerPage * columnWidth;
@@ -1059,7 +1062,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         !enableResourceScroll ||
         !isResourceMode ||
         !resources ||
-        !dateResourceItems
+        !dateResourceItems ||
+        isRecenteringRef.current
       ) {
         return;
       }
