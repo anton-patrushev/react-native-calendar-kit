@@ -399,11 +399,14 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     // Sync offsetX for linked scroll (header follows body)
     offsetX.value = initialOffset;
 
-    // Scroll both header and body to new position instantly
+    // Scroll header to new position instantly. Body scroll is handled by
+    // CalendarList's own useLayoutEffect (when CalendarBody is mounted) or
+    // WeekResourcesBody's sync effect (when it replaces CalendarBody).
+    // We must NOT call scrollTo(gridListRef) here because gridListRef may be
+    // unattached (WeekResourcesBody mode) — Reanimated would crash.
     runOnUI(() => {
       'worklet';
       scrollTo(dayBarListRef, initialOffset, 0, false);
-      scrollTo(gridListRef, initialOffset, 0, false);
     })();
 
     // Allow date tracking again
