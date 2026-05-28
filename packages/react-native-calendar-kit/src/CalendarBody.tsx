@@ -58,6 +58,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   renderDraggableEvent,
   renderDraggingEvent,
   renderDraggingHour,
+  renderHalfHour,
   NowIndicatorComponent,
   renderCustomHorizontalLine,
   dayEndLineStyle: dayEndLineStyleProp,
@@ -259,6 +260,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   const value = useMemo<BodyContextProps>(
     () => ({
       renderHour,
+      renderHalfHour,
       offsetY,
       minuteHeight,
       maxTimelineHeight,
@@ -313,6 +315,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     }),
     [
       renderHour,
+      renderHalfHour,
       offsetY,
       minuteHeight,
       maxTimelineHeight,

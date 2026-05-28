@@ -22,6 +22,7 @@ const TimeColumn = () => {
     spaceFromBottom,
     timelineHeight,
     renderHour,
+    renderHalfHour,
     hourWidth,
     showTimeColumnRightLine,
     counterScaleStyle,
@@ -86,6 +87,37 @@ const TimeColumn = () => {
     [cellBorderColor, counterScaleStyle, renderHour, style, totalSlots]
   );
 
+  const halfHourElements = useMemo(() => {
+    if (!renderHalfHour) return null;
+    return hours.map((hour, index) => {
+      const halfMinutes = hour.slot + 30;
+      const children = renderHalfHour({
+        hourStr: '30',
+        minutes: halfMinutes,
+        style,
+      });
+      if (!children) return null;
+      return (
+        <View
+          key={`half-${hour.slot}`}
+          style={[
+            styles.absolute,
+            { top: `${((index + 0.5) / totalSlots) * 100}%`, width: '100%' },
+          ]}>
+          <Animated.View
+            style={[
+              styles.absolute,
+              styles.hour,
+              { right: HOUR_SHORT_LINE_WIDTH + 8 },
+              counterScaleStyle,
+            ]}>
+            {children}
+          </Animated.View>
+        </View>
+      );
+    });
+  }, [counterScaleStyle, hours, renderHalfHour, style, totalSlots]);
+
   const animView = useAnimatedStyle(() => ({
     height: timelineHeight.value - spaceFromTop - spaceFromBottom,
   }));
@@ -108,6 +140,7 @@ const TimeColumn = () => {
           animView,
         ]}>
         {hours.map(_renderHour)}
+        {halfHourElements}
       </Animated.View>
       {showTimeColumnRightLine && (
         <View
