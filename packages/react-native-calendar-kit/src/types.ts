@@ -947,6 +947,12 @@ export interface CalendarBodyProps {
    */
   renderHalfHour?: (props: RenderHourProps) => React.ReactElement | null;
 
+  /** Custom quarter-hour text rendered at :15 and :45 between each hour label
+   *
+   * Note: Please use `useCallback` to memoize the function
+   */
+  renderQuarterHour?: (props: RenderHourProps) => React.ReactElement | null;
+
   /** Show now indicator */
   showNowIndicator?: boolean;
 
