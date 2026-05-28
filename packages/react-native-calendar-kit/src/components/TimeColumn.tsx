@@ -23,6 +23,7 @@ const TimeColumn = () => {
     timelineHeight,
     renderHour,
     renderHalfHour,
+    renderQuarterHour,
     hourWidth,
     showTimeColumnRightLine,
     counterScaleStyle,
@@ -118,6 +119,68 @@ const TimeColumn = () => {
     });
   }, [counterScaleStyle, hours, renderHalfHour, style, totalSlots]);
 
+  const quarterHourElements = useMemo(() => {
+    if (!renderQuarterHour) return null;
+    const elements: React.ReactNode[] = [];
+    hours.forEach((hour, index) => {
+      // :15 mark
+      const q1Minutes = hour.slot + 15;
+      const q1Children = renderQuarterHour({
+        hourStr: '15',
+        minutes: q1Minutes,
+        style,
+      });
+      if (q1Children) {
+        elements.push(
+          <View
+            key={`q1-${hour.slot}`}
+            style={[
+              styles.absolute,
+              { top: `${((index + 0.25) / totalSlots) * 100}%`, width: '100%' },
+            ]}>
+            <Animated.View
+              style={[
+                styles.absolute,
+                styles.hour,
+                { right: HOUR_SHORT_LINE_WIDTH + 8 },
+                counterScaleStyle,
+              ]}>
+              {q1Children}
+            </Animated.View>
+          </View>
+        );
+      }
+      // :45 mark
+      const q3Minutes = hour.slot + 45;
+      const q3Children = renderQuarterHour({
+        hourStr: '45',
+        minutes: q3Minutes,
+        style,
+      });
+      if (q3Children) {
+        elements.push(
+          <View
+            key={`q3-${hour.slot}`}
+            style={[
+              styles.absolute,
+              { top: `${((index + 0.75) / totalSlots) * 100}%`, width: '100%' },
+            ]}>
+            <Animated.View
+              style={[
+                styles.absolute,
+                styles.hour,
+                { right: HOUR_SHORT_LINE_WIDTH + 8 },
+                counterScaleStyle,
+              ]}>
+              {q3Children}
+            </Animated.View>
+          </View>
+        );
+      }
+    });
+    return elements;
+  }, [counterScaleStyle, hours, renderQuarterHour, style, totalSlots]);
+
   const animView = useAnimatedStyle(() => ({
     height: timelineHeight.value - spaceFromTop - spaceFromBottom,
   }));
@@ -140,6 +203,7 @@ const TimeColumn = () => {
           animView,
         ]}>
         {hours.map(_renderHour)}
+        {quarterHourElements}
         {halfHourElements}
       </Animated.View>
       {showTimeColumnRightLine && (
