@@ -157,6 +157,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   // reliable than transformOrigin across platforms (Android may ignore
   // transformOrigin when it's in a separate style object from transform).
   const innerScaleStyle = useAnimatedStyle(() => ({
+    height: timelineHeight.value,
     transform: [
       { translateY: (timelineHeight.value / 2) * (zoomScale.value - 1) },
       { scaleY: zoomScale.value },
@@ -422,10 +423,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
               {/* Inner scale container: GPU-accelerated scaleY transform */}
               <Animated.View
                 style={[
-                  {
-                    width: calendarLayout.width,
-                    height: timelineHeight.value,
-                  },
+                  { width: calendarLayout.width },
                   innerScaleStyle,
                 ]}>
               <View
