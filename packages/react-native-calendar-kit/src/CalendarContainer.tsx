@@ -932,6 +932,12 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     resourcePerPage,
   ]);
 
+  // Track the previous resource-mode scroll offset so we can pick the visible
+  // date in the direction of travel (see handleResourceScrollOffsetChange).
+  // Without this, backward scrolls lag because we always picked the latest
+  // visible date, which stayed pinned to the day being scrolled away from.
+  const previousResourceScrollOffsetRef = useRef<number>(0);
+
   const handleResourceScrollOffsetChange = useLatestCallback(
     (scrollOffset: number) => {
       if (
@@ -966,12 +972,23 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         }
       }
 
-      // Select the latest date that has at least one visible resource
+      // Pick the visible date in the direction of travel:
+      //   forward  (offset increasing) → latest visible date
+      //   backward (offset decreasing) → earliest visible date
+      // Picking unconditionally-latest (the original behaviour) means a
+      // backward scroll keeps reporting the day we're moving AWAY from until
+      // it fully exits the viewport, which makes consumers like a custom
+      // header lag visibly on backward swipes.
+      const scrollingBackward =
+        scrollOffset < previousResourceScrollOffsetRef.current;
+      previousResourceScrollOffsetRef.current = scrollOffset;
       const visibleDates = Array.from(dayCounts.keys()).sort((a, b) => a - b);
       const activeDayUnix =
-        visibleDates.length > 0
-          ? visibleDates[visibleDates.length - 1]
-          : visibleDateUnix.current;
+        visibleDates.length === 0
+          ? visibleDateUnix.current
+          : scrollingBackward
+          ? visibleDates[0]
+          : visibleDates[visibleDates.length - 1];
 
       if (activeDayUnix && activeDayUnix !== visibleDateUnix.current) {
         hapticService.selection();
