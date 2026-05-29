@@ -207,28 +207,27 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
       </GestureDetector>
       <GestureDetector gesture={topEdgeGesture}>
         {TopEdgeComponent || (
-          <Animated.View
+          // Phase 1 perf: drag dots no longer counter-scaled.
+          <View
             style={[
               styles.dot,
               styles.dotLeft,
               numberOfDays === 1 && styles.dotLeftSingle,
-              counterScaleStyle,
             ]}>
             <DragDot />
-          </Animated.View>
+          </View>
         )}
       </GestureDetector>
       <GestureDetector gesture={bottomEdgeGesture}>
         {BottomEdgeComponent || (
-          <Animated.View
+          <View
             style={[
               styles.dot,
               styles.dotRight,
               numberOfDays === 1 && styles.dotRightSingle,
-              counterScaleStyle,
             ]}>
             <DragDot />
-          </Animated.View>
+          </View>
         )}
       </GestureDetector>
     </Animated.View>

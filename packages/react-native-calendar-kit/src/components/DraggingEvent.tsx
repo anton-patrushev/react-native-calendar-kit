@@ -157,16 +157,16 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
       return TopEdgeComponent;
     }
 
+    // Phase 1 perf: drag dots no longer counter-scaled.
     return (
-      <Animated.View
+      <View
         style={[
           styles.dot,
           styles.dotLeft,
           numberOfDays === 1 && styles.dotLeftSingle,
-          counterScaleStyle,
         ]}>
         <DragDot />
-      </Animated.View>
+      </View>
     );
   };
 
@@ -180,15 +180,14 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     }
 
     return (
-      <Animated.View
+      <View
         style={[
           styles.dot,
           styles.dotRight,
           numberOfDays === 1 && styles.dotRightSingle,
-          counterScaleStyle,
         ]}>
         <DragDot />
-      </Animated.View>
+      </View>
     );
   };
 

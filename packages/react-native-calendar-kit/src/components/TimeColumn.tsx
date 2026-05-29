@@ -72,7 +72,9 @@ const TimeColumn = () => {
             ]}>
             {children}
           </Animated.View>
-          <Animated.View
+          {/* Phase 1 perf: shortLine no longer counter-scaled — 1px tick
+              stretching to ~zoomScale px isn't worth a per-tick useAnimatedStyle. */}
+          <View
             style={[
               styles.absolute,
               styles.shortLine,
@@ -80,7 +82,6 @@ const TimeColumn = () => {
                 backgroundColor: cellBorderColor,
                 width: HOUR_SHORT_LINE_WIDTH,
               },
-              counterScaleStyle,
             ]}
           />
         </View>

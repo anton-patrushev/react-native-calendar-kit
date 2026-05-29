@@ -308,7 +308,15 @@ const EventItem: FC<EventItemProps> = ({
                 zoomScale,
               })
             ) : (
-              <Animated.View style={counterScaleStyle}>
+              {/*
+                transformOrigin: 'top' anchors the counter-scaled title to the
+                top edge of the event block. Without it the default center
+                origin shrinks the title around its bounding-box center, so at
+                zoom > 1 the title drifts ~titleHeight*(z-1)/2 below the block
+                top — visibly mis-aligned on short blocks.
+              */}
+              <Animated.View
+                style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
                 <Text
                   style={[
                     styles.title,

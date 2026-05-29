@@ -33,7 +33,6 @@ const NowIndicatorInner = ({
     startOffset,
     columnWidth,
     NowIndicatorComponent,
-    counterScaleStyle,
   } = useBody();
   const nowIndicatorColor = useTheme(
     useCallback((state) => state.nowIndicatorColor || state.colors.primary, [])
@@ -61,18 +60,19 @@ const NowIndicatorInner = ({
         },
         animView,
       ]}>
-      <Animated.View style={counterScaleStyle}>
-        {NowIndicatorComponent || (
-          <View style={styles.lineContainer}>
-            <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
-            {showDot && (
-              <View
-                style={[styles.dot, { backgroundColor: nowIndicatorColor }]}
-              />
-            )}
-          </View>
-        )}
-      </Animated.View>
+      {/* Phase 1 perf: counter-scale wrapper removed. Now-line + dot are
+          geometric (1–2 px) — vertical stretch at zoom isn't worth a
+          per-frame native commit. */}
+      {NowIndicatorComponent || (
+        <View style={styles.lineContainer}>
+          <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
+          {showDot && (
+            <View
+              style={[styles.dot, { backgroundColor: nowIndicatorColor }]}
+            />
+          )}
+        </View>
+      )}
     </Animated.View>
   );
 };
