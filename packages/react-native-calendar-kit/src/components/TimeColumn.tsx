@@ -75,7 +75,7 @@ const TimeColumn = () => {
         </View>
       );
     },
-    [cellBorderColor, counterScaleStyle, renderHour, style, totalSlots]
+    [counterScaleStyle, renderHour, style, totalSlots]
   );
 
   const halfHourElements = useMemo(() => {

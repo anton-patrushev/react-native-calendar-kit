@@ -13,7 +13,6 @@ import {
   forceUpdateZone,
   parseDateTime,
 } from '../../utils/dateUtils';
-import HorizontalLine from '../TimelineBoard/HorizontalLine';
 import VerticalLine from '../TimelineBoard/VerticalLine';
 import Touchable from '../Touchable';
 import UnavailableHoursByResource from './UnavailableHoursByResource';
@@ -33,13 +32,11 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
     totalSlots,
     columnWidth,
     minuteHeight,
-    renderCustomHorizontalLine,
     visibleDateUnixAnim,
     start,
     resourcePerPage,
     spaceFromBottom,
     timelineHeight,
-    showQuarterHourLines,
     dayEndLineStyle: dayEndLineStyleFromContext,
   } = useBody();
   const { timeZone } = useTimezone();
@@ -135,70 +132,6 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
     return lines;
   }, [resources.length, colors.border, columnWidth, resourcePerPage, isDayEnd, isDayStart, resolvedDayEndLineStyle]);
 
-  const _renderHorizontalLines = useMemo(() => {
-    const rows: React.ReactNode[] = [];
-    for (let i = 0; i < totalSlots; i++) {
-      // Full hour line (:00)
-      rows.push(
-        <HorizontalLine
-          key={i}
-          borderColor={colors.border}
-          index={i}
-          totalSlots={totalSlots}
-          renderCustomHorizontalLine={renderCustomHorizontalLine}
-        />
-      );
-
-      // Quarter hour line (:15) - only when showQuarterHourLines is enabled
-      if (showQuarterHourLines) {
-        rows.push(
-          <HorizontalLine
-            key={`${i}.25`}
-            borderColor={colors.border}
-            index={i + 0.25}
-            totalSlots={totalSlots}
-            renderCustomHorizontalLine={renderCustomHorizontalLine}
-          />
-        );
-      }
-
-      // Half hour line (:30)
-      rows.push(
-        <HorizontalLine
-          key={`${i}.5`}
-          borderColor={colors.border}
-          index={i + 0.5}
-          totalSlots={totalSlots}
-          renderCustomHorizontalLine={renderCustomHorizontalLine}
-        />
-      );
-
-      // Three-quarter hour line (:45) - only when showQuarterHourLines is enabled
-      if (showQuarterHourLines) {
-        rows.push(
-          <HorizontalLine
-            key={`${i}.75`}
-            borderColor={colors.border}
-            index={i + 0.75}
-            totalSlots={totalSlots}
-            renderCustomHorizontalLine={renderCustomHorizontalLine}
-          />
-        );
-      }
-    }
-
-    rows.push(
-      <HorizontalLine
-        key={totalSlots}
-        borderColor={colors.border}
-        index={totalSlots}
-        totalSlots={totalSlots}
-        renderCustomHorizontalLine={renderCustomHorizontalLine}
-      />
-    );
-    return rows;
-  }, [totalSlots, colors.border, renderCustomHorizontalLine, showQuarterHourLines]);
-
   return (
     <View style={styles.container}>
       <Animated.View
@@ -225,7 +158,6 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
           resources={resources}
           visibleDates={visibleDates}
         />
-        {_renderHorizontalLines}
       </Animated.View>
       {!!resources?.length && _renderVerticalLines}
     </View>
