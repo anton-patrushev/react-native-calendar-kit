@@ -14,8 +14,6 @@ import { Platform } from 'react-native';
 const SCALE_FACTOR = 0.5;
 const SPRING_DAMPING = 15;
 const SPRING_STIFFNESS = 100;
-/** Allow overscrolling past min/max by this fraction of zoomScale range. */
-const BOUNDARY_PADDING_FRAC = 0.05;
 
 const usePinchToZoom = () => {
   const {
@@ -42,9 +40,6 @@ const usePinchToZoom = () => {
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
 
-  const boundaryPadding =
-    (maxZoomScale - minZoomScale) * BOUNDARY_PADDING_FRAC;
-
   const pinchGesture = Gesture.Pinch()
     .onBegin(({ focalY }) => {
       // Cancel any in-flight overscroll spring from a previous gesture.
@@ -67,11 +62,17 @@ const usePinchToZoom = () => {
       const scaledDiff = (newGestureScale - lastScale.value) * SCALE_FACTOR;
       const newZoomScale = oldZoomScale * (1 + scaledDiff);
 
-      // Clamp with rubber-band padding
+      // Clamp directly to [min, max] — no rubber-band overshoot. Allowing
+      // overshoot here caused a visible "bounce" on Fabric: on release we
+      // had to spring `zoomScale` back to the clamp, but the focal-point
+      // anchored scroll was already set to its post-clamp target, so the
+      // content visibly jumped at release moment and sprang back as the
+      // value settled. Fabric commits content-size and scroll-offset
+      // updates in separate phases, exposing the mismatch.
       const clampedZoomScale = clampValues(
         newZoomScale,
-        minZoomScale - boundaryPadding,
-        maxZoomScale + boundaryPadding
+        minZoomScale,
+        maxZoomScale
       );
 
       // Focal-point anchoring using gesture-start snapshot.
