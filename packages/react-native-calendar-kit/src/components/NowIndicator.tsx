@@ -90,9 +90,19 @@ const NowIndicator: FC<{
 }> = ({ visibleDates, showDot = true }) => {
   const { showNowIndicator } = useBody();
   const { currentDateUnix, currentTime } = useNowIndicator();
+  // Track the currently-visible day so the indicator hides on BodyItems
+  // that virtualization keeps mounted in the drawDistance buffer. Without
+  // this, scrolling to a previous day in single-day mode left today's
+  // (off-active-page) BodyItem rendering the indicator, which leaked
+  // into view during/after the horizontal swipe.
+  const activeDayUnix = useDateChangedListener();
 
   const visibleDate = visibleDates[currentDateUnix];
-  const isShowNowIndicator = showNowIndicator && visibleDate;
+  // Show only when this BodyItem's visibleDates contains BOTH today AND
+  // the active day. For single-day mode this collapses to "activeDay ===
+  // today". For multi-day mode it means "today is in the active week".
+  const isShowNowIndicator =
+    showNowIndicator && !!visibleDate && !!visibleDates[activeDayUnix];
 
   if (!isShowNowIndicator) {
     return null;
@@ -129,7 +139,10 @@ export const NowIndicatorResource = () => {
 export default React.memo(NowIndicator);
 
 const styles = StyleSheet.create({
-  container: { position: 'absolute', zIndex: 1 },
+  // zIndex above TimeColumn (998) so the indicator paints over the hour
+  // labels — consumers commonly want the line/dot to draw across the
+  // time-label column rather than be obscured by it.
+  container: { position: 'absolute', zIndex: 999 },
   line: {
     position: 'absolute',
     height: 2,
