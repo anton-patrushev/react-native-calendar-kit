@@ -132,23 +132,39 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
     };
   }, [resourceIndex]);
 
-  // The base radius prefers consumer's `containerStyle.borderRadius`, then
-  // `theme.eventContainerStyle.borderRadius`, then the library default (4).
-  const baseSelectedRadius =
+  // Base border width / radius — sourced from consumer's containerStyle
+  // first, then theme.eventContainerStyle, then library defaults. Always
+  // zoom-compensate so the consumer's static value doesn't visibly stretch
+  // at high zoom.
+  const consumerSelectedBorderWidth =
+    typeof (containerStyle as { borderWidth?: number } | undefined)
+      ?.borderWidth === 'number'
+      ? (containerStyle as { borderWidth: number }).borderWidth
+      : undefined;
+  const consumerSelectedBorderRadius =
     typeof (containerStyle as { borderRadius?: number } | undefined)
       ?.borderRadius === 'number'
       ? (containerStyle as { borderRadius: number }).borderRadius
-      : typeof (theme.eventContainerStyle as
-          | { borderRadius?: number }
-          | undefined)?.borderRadius === 'number'
+      : undefined;
+  const themeSelectedBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
       ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
-      : 4;
-  // Counter-scale top/bottom border widths so the outline stays 3px thick at
-  // any zoom while preserving borderRadius. Selecting an event then pinching
-  // is rare; this animated layout prop fires only when zoomScale changes.
+      : undefined;
+  const baseSelectedWidth = consumerSelectedBorderWidth ?? 3;
+  const baseSelectedRadius =
+    consumerSelectedBorderRadius ?? themeSelectedBorderRadius ?? 4;
+
+  const sideBordersStyle = {
+    borderLeftWidth: baseSelectedWidth,
+    borderRightWidth: baseSelectedWidth,
+  };
+  // Top/bottom widths + borderRadius animate with zoom so their visual
+  // values stay constant. Selecting an event then pinching is rare; this
+  // animated layout prop fires only when zoomScale changes.
   const outlineBorderStyle = useAnimatedStyle(() => ({
-    borderTopWidth: 3 / zoomScale.value,
-    borderBottomWidth: 3 / zoomScale.value,
+    borderTopWidth: baseSelectedWidth / zoomScale.value,
+    borderBottomWidth: baseSelectedWidth / zoomScale.value,
     borderRadius: baseSelectedRadius / zoomScale.value,
   }));
 
@@ -205,24 +221,20 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
           style={[
             StyleSheet.absoluteFill,
             theme.eventContainerStyle,
-            !containerStyle && styles.event,
-            !containerStyle && {
+            {
               backgroundColor:
                 selectedEvent?.color ??
                 (Platform.OS === 'android'
                   ? theme.primaryColor
                   : 'transparent'),
               borderColor: theme.primaryColor,
+              overflow: 'hidden',
             },
-            containerStyle && {
-              backgroundColor:
-                selectedEvent?.color ??
-                (Platform.OS === 'android'
-                  ? theme.primaryColor
-                  : 'transparent'),
-            },
-            !containerStyle && outlineBorderStyle,
             containerStyle,
+            // Apply our computed border widths/radius LAST so they always
+            // win over consumer's shorthand `borderWidth` — see DraggingEvent.
+            sideBordersStyle,
+            outlineBorderStyle,
           ]}>
           {renderEvent ? (
             renderEvent(selectedEvent, {

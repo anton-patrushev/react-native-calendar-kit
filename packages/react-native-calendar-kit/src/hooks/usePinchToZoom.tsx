@@ -26,6 +26,9 @@ const usePinchToZoom = () => {
     maxZoomScale,
     offsetY,
     allowPinchToZoom,
+    // Owned by CalendarContainer so the onZoomChange reaction can gate on it.
+    isPinching,
+    isSettling,
   } = useCalendar();
 
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
@@ -38,11 +41,6 @@ const usePinchToZoom = () => {
   const startFocalY = useSharedValue(0);
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
-
-  // Exposed to CalendarBody so _onScroll can skip offsetY updates on
-  // Android while pinching (prevents native scroll auto-adjustments
-  // from overwriting our computed offset).
-  const isPinching = useSharedValue(false);
 
   const boundaryPadding =
     (maxZoomScale - minZoomScale) * BOUNDARY_PADDING_FRAC;
@@ -110,10 +108,23 @@ const usePinchToZoom = () => {
           anchorFrac * timelineHeight.value * finalZoomScale -
           startFocalY.value;
 
-        zoomScale.value = withSpring(finalZoomScale, {
-          damping: SPRING_DAMPING,
-          stiffness: SPRING_STIFFNESS,
-        });
+        // Flag the settle window so CalendarContainer defers
+        // onZoomChange until the spring completes — otherwise the
+        // intermediate percent ticks during the spring would land on the
+        // JS thread and shake consumers that do setState in their
+        // onZoomChange handler.
+        isSettling.value = true;
+        zoomScale.value = withSpring(
+          finalZoomScale,
+          {
+            damping: SPRING_DAMPING,
+            stiffness: SPRING_STIFFNESS,
+          },
+          () => {
+            'worklet';
+            isSettling.value = false;
+          }
+        );
         offsetY.value = targetOffset;
         scrollTo(verticalListRef, 0, targetOffset, false);
       }

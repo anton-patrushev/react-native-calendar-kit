@@ -188,54 +188,69 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     );
   };
 
-  // Animated top/bottom border widths cancel parent scaleY so the outline
-  // stays 3px thick visually at any zoom while preserving borderRadius.
-  // Left/right stay 3px (X axis isn't scaled). Drag is mutually exclusive
-  // with pinch → zoomScale is constant during drag, so this animated layout
-  // prop re-fires at most once per drag mount.
-  // The base radius prefers consumer's `containerStyle.borderRadius`, then
-  // `theme.eventContainerStyle.borderRadius`, then the library default (4).
-  const baseDraggingRadius =
+  // Base border width / radius — sourced from consumer's containerStyle
+  // first, then theme.eventContainerStyle, then library defaults. Always
+  // zoom-compensate so the consumer's static value doesn't visibly stretch
+  // at high zoom.
+  const consumerBorderWidth =
+    typeof (containerStyle as { borderWidth?: number } | undefined)
+      ?.borderWidth === 'number'
+      ? (containerStyle as { borderWidth: number }).borderWidth
+      : undefined;
+  const consumerBorderRadius =
     typeof (containerStyle as { borderRadius?: number } | undefined)
       ?.borderRadius === 'number'
       ? (containerStyle as { borderRadius: number }).borderRadius
-      : typeof (theme.eventContainerStyle as
-          | { borderRadius?: number }
-          | undefined)?.borderRadius === 'number'
+      : undefined;
+  const themeBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
       ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
-      : 4;
+      : undefined;
+  const baseDraggingWidth = consumerBorderWidth ?? 3;
+  const baseDraggingRadius =
+    consumerBorderRadius ?? themeBorderRadius ?? 4;
+
+  // Left/right border width is static (X axis not scaled by zoom) —
+  // mirrors baseDraggingWidth so all four sides match at any zoom.
+  const sideBordersStyle = {
+    borderLeftWidth: baseDraggingWidth,
+    borderRightWidth: baseDraggingWidth,
+  };
+  // Top/bottom widths + borderRadius animate with zoom so their visual
+  // values stay constant. Drag is mutually exclusive with pinch, so
+  // zoomScale is constant during drag — this animated layout prop fires
+  // at most once per drag mount.
   const outlineBorderStyle = useAnimatedStyle(() => ({
-    borderTopWidth: 3 / zoomScale.value,
-    borderBottomWidth: 3 / zoomScale.value,
-    // Counter parent scaleY's effect on borderRadius so the vertical
-    // visual radius stays constant at any zoom (RN has no asymmetric X/Y
-    // radii, so horizontal flattens at high zoom).
+    borderTopWidth: baseDraggingWidth / zoomScale.value,
+    borderBottomWidth: baseDraggingWidth / zoomScale.value,
+    // RN has no asymmetric X/Y radii, so horizontal radius flattens at
+    // high zoom — accepted trade-off vs the alternative of unbounded
+    // vertical curve eating into content.
     borderRadius: baseDraggingRadius / zoomScale.value,
   }));
 
-  // When the consumer provides a `containerStyle`, hand the visual fully
-  // over to them — drop the library's hardcoded `styles.event` border
-  // sides + animated `outlineBorderStyle` so RN's per-side border merging
-  // doesn't paint library borders through consumer's shorthand
-  // `borderWidth`. Without `containerStyle`, default rendering keeps the
-  // 3px outline with zoom compensation.
-  const hasCustomContainerStyle = !!containerStyle;
   return (
     <Animated.View style={[styles.container, { width: eventWidth }, animView]}>
       <Animated.View
         style={[
           StyleSheet.absoluteFill,
           theme.eventContainerStyle,
-          !hasCustomContainerStyle && styles.event,
-          !hasCustomContainerStyle && {
+          // Backgrounds + library default borderColor — consumer's
+          // containerStyle.borderColor (if any) overrides via the array
+          // order below.
+          {
             backgroundColor: draggingEvent?.color ?? 'transparent',
             borderColor: theme.primaryColor,
+            overflow: 'hidden',
           },
-          hasCustomContainerStyle && {
-            backgroundColor: draggingEvent?.color ?? 'transparent',
-          },
-          !hasCustomContainerStyle && outlineBorderStyle,
           containerStyle,
+          // Apply our computed border widths/radius LAST so they always
+          // win over consumer's static shorthand `borderWidth` — RN's
+          // per-side border merging makes side-specific properties
+          // override the shorthand, which is exactly what we want here.
+          sideBordersStyle,
+          outlineBorderStyle,
         ]}>
         {renderEvent ? (
           renderEvent(draggingEvent, {
