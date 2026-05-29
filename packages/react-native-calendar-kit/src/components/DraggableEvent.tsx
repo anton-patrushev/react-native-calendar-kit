@@ -198,13 +198,15 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
         { width: eventWidth, left: startX + left },
         animView,
       ]}>
+      {/* When the consumer provides `containerStyle`, hand visual control
+          fully over to them — see DraggingEvent for the same rationale. */}
       {selectedEvent && (
         <Animated.View
           style={[
             StyleSheet.absoluteFill,
             theme.eventContainerStyle,
-            styles.event,
-            {
+            !containerStyle && styles.event,
+            !containerStyle && {
               backgroundColor:
                 selectedEvent?.color ??
                 (Platform.OS === 'android'
@@ -212,7 +214,14 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
                   : 'transparent'),
               borderColor: theme.primaryColor,
             },
-            outlineBorderStyle,
+            containerStyle && {
+              backgroundColor:
+                selectedEvent?.color ??
+                (Platform.OS === 'android'
+                  ? theme.primaryColor
+                  : 'transparent'),
+            },
+            !containerStyle && outlineBorderStyle,
             containerStyle,
           ]}>
           {renderEvent ? (

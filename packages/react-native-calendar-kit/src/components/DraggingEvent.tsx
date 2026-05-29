@@ -213,18 +213,28 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     borderRadius: baseDraggingRadius / zoomScale.value,
   }));
 
+  // When the consumer provides a `containerStyle`, hand the visual fully
+  // over to them — drop the library's hardcoded `styles.event` border
+  // sides + animated `outlineBorderStyle` so RN's per-side border merging
+  // doesn't paint library borders through consumer's shorthand
+  // `borderWidth`. Without `containerStyle`, default rendering keeps the
+  // 3px outline with zoom compensation.
+  const hasCustomContainerStyle = !!containerStyle;
   return (
     <Animated.View style={[styles.container, { width: eventWidth }, animView]}>
       <Animated.View
         style={[
           StyleSheet.absoluteFill,
           theme.eventContainerStyle,
-          styles.event,
-          {
+          !hasCustomContainerStyle && styles.event,
+          !hasCustomContainerStyle && {
             backgroundColor: draggingEvent?.color ?? 'transparent',
             borderColor: theme.primaryColor,
           },
-          outlineBorderStyle,
+          hasCustomContainerStyle && {
+            backgroundColor: draggingEvent?.color ?? 'transparent',
+          },
+          !hasCustomContainerStyle && outlineBorderStyle,
           containerStyle,
         ]}>
         {renderEvent ? (
