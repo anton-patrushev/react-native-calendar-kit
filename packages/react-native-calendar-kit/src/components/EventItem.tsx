@@ -7,7 +7,10 @@ import {
   Pressable,
   type GestureResponderEvent,
 } from 'react-native';
-import Animated, { useDerivedValue } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useDerivedValue,
+} from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY } from '../constants';
 import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -243,6 +246,15 @@ const EventItem: FC<EventItemProps> = ({
 
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
 
+  // Counter the parent scaleY's effect on borderRadius. Layout radius
+  // shrinks as zoom grows so the vertical visual radius stays at the base
+  // (~2px). RN can't express asymmetric X/Y radii, so the horizontal radius
+  // flattens slightly at high zoom — accepted trade-off vs the alternative
+  // (vertical curve eating into content via overflow:hidden clipping).
+  const borderRadiusStyle = useAnimatedStyle(() => ({
+    borderRadius: 2 / zoomScale.value,
+  }));
+
   // Compute overlap border style
   const overlapBorderStyle = useMemo(() => {
     // Show border only for stacked events (stackLevel > 0)
@@ -293,13 +305,14 @@ const EventItem: FC<EventItemProps> = ({
         onPress={onPressEvent ? _onPressEvent : undefined}
         onLongPress={onLongPressEvent ? _onLongPressEvent : undefined}>
         {({ pressed }) => (
-          <View
+          <Animated.View
             style={[
               styles.contentContainer,
               { backgroundColor: event.color },
               theme.eventContainerStyle,
               overlapBorderStyle,
               { opacity },
+              borderRadiusStyle,
             ]}>
             {renderEvent ? (
               renderEvent(eventInput, {
@@ -326,7 +339,7 @@ const EventItem: FC<EventItemProps> = ({
             )}
             {/* Dark overlay for pressed state - darkens card without transparency */}
             {pressed && <View style={styles.pressedOverlay} />}
-          </View>
+          </Animated.View>
         )}
       </Pressable>
     </View>

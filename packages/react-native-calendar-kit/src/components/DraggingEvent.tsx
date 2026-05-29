@@ -153,20 +153,20 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
       return null;
     }
 
-    if (TopEdgeComponent) {
-      return TopEdgeComponent;
-    }
-
-    // Phase 1 perf: drag dots no longer counter-scaled.
+    // Default (center) transformOrigin so counter-scale shrinks the dot
+    // around its own center. The dot is already positioned by layout
+    // (top: -12) so its visual center sits exactly on the event's top
+    // edge — center-origin scale keeps it there at any zoom.
     return (
-      <View
+      <Animated.View
         style={[
           styles.dot,
           styles.dotLeft,
           numberOfDays === 1 && styles.dotLeftSingle,
+          counterScaleStyle,
         ]}>
-        <DragDot />
-      </View>
+        {TopEdgeComponent || <DragDot />}
+      </Animated.View>
     );
   };
 
@@ -175,25 +175,36 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
       return null;
     }
 
-    if (BottomEdgeComponent) {
-      return BottomEdgeComponent;
-    }
-
     return (
-      <View
+      <Animated.View
         style={[
           styles.dot,
           styles.dotRight,
           numberOfDays === 1 && styles.dotRightSingle,
+          counterScaleStyle,
         ]}>
-        <DragDot />
-      </View>
+        {BottomEdgeComponent || <DragDot />}
+      </Animated.View>
     );
   };
 
+  // Animated top/bottom border widths cancel parent scaleY so the outline
+  // stays 3px thick visually at any zoom while preserving borderRadius.
+  // Left/right stay 3px (X axis isn't scaled). Drag is mutually exclusive
+  // with pinch → zoomScale is constant during drag, so this animated layout
+  // prop re-fires at most once per drag mount.
+  const outlineBorderStyle = useAnimatedStyle(() => ({
+    borderTopWidth: 3 / zoomScale.value,
+    borderBottomWidth: 3 / zoomScale.value,
+    // Counter parent scaleY's effect on borderRadius so the vertical
+    // visual radius stays ~4px at any zoom (RN has no asymmetric X/Y
+    // radii, so horizontal flattens at high zoom).
+    borderRadius: 4 / zoomScale.value,
+  }));
+
   return (
     <Animated.View style={[styles.container, { width: eventWidth }, animView]}>
-      <View
+      <Animated.View
         style={[
           StyleSheet.absoluteFill,
           theme.eventContainerStyle,
@@ -202,6 +213,7 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
             backgroundColor: draggingEvent?.color ?? 'transparent',
             borderColor: theme.primaryColor,
           },
+          outlineBorderStyle,
           containerStyle,
         ]}>
         {renderEvent ? (
@@ -210,7 +222,8 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
             height: eventHeight,
           })
         ) : (
-          <Animated.View style={counterScaleStyle}>
+          <Animated.View
+            style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
             {!!draggingEvent?.title && (
               <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
                 {draggingEvent.title}
@@ -218,7 +231,7 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
             )}
           </Animated.View>
         )}
-      </View>
+      </Animated.View>
       {isShowDot && renderTopEdgeComponent()}
       {isShowDot && renderBottomEdgeComponent()}
     </Animated.View>
@@ -295,8 +308,9 @@ const styles = StyleSheet.create({
     height: 24,
   },
   event: {
-    borderWidth: 3,
-    borderRadius: 4,
+    borderLeftWidth: 3,
+    borderRightWidth: 3,
+    // borderRadius supplied by outlineBorderStyle (animated by zoom).
     overflow: 'hidden',
   },
   dotLeft: { top: -12, left: -12 },

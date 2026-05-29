@@ -96,7 +96,8 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = tr
           { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
           startAnimStyle,
         ]}>
-        <Animated.View style={counterScaleStyle}>
+        <Animated.View
+          style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
           {renderHour ? (
             renderHour({
               hourStr: startHourStr,
@@ -118,7 +119,8 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = tr
             { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
             endAnimStyle,
           ]}>
-          <Animated.View style={counterScaleStyle}>
+          <Animated.View
+            style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
             {renderHour ? (
               renderHour({
                 hourStr: endHourStr,

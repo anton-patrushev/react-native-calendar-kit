@@ -33,6 +33,7 @@ const NowIndicatorInner = ({
     startOffset,
     columnWidth,
     NowIndicatorComponent,
+    counterScaleStyle,
   } = useBody();
   const nowIndicatorColor = useTheme(
     useCallback((state) => state.nowIndicatorColor || state.colors.primary, [])
@@ -60,19 +61,25 @@ const NowIndicatorInner = ({
         },
         animView,
       ]}>
-      {/* Phase 1 perf: counter-scale wrapper removed. Now-line + dot are
-          geometric (1–2 px) — vertical stretch at zoom isn't worth a
-          per-frame native commit. */}
-      {NowIndicatorComponent || (
-        <View style={styles.lineContainer}>
-          <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
-          {showDot && (
-            <View
-              style={[styles.dot, { backgroundColor: nowIndicatorColor }]}
-            />
-          )}
-        </View>
-      )}
+      {/*
+        Counter-scale wrapper applies to BOTH the default line+dot AND any
+        consumer-provided NowIndicatorComponent so it doesn't stretch
+        vertically at non-1 zoom. transformOrigin: 'top' anchors the
+        indicator at the current-time row; without it, default center-origin
+        would pull the line off-row at zoom > 1.
+      */}
+      <Animated.View style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
+        {NowIndicatorComponent || (
+          <View style={styles.lineContainer}>
+            <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
+            {showDot && (
+              <View
+                style={[styles.dot, { backgroundColor: nowIndicatorColor }]}
+              />
+            )}
+          </View>
+        )}
+      </Animated.View>
     </Animated.View>
   );
 };

@@ -57,8 +57,14 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
       };
     }, [])
   );
-  const { minuteHeight, columnWidth, start, numberOfDays, counterScaleStyle } =
-    useBody();
+  const {
+    minuteHeight,
+    columnWidth,
+    start,
+    numberOfDays,
+    counterScaleStyle,
+    zoomScale,
+  } = useBody();
   const {
     dragStartUnix,
     dragSelectedStartUnix,
@@ -126,6 +132,15 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
     };
   }, [resourceIndex]);
 
+  // Counter-scale top/bottom border widths so the outline stays 3px thick at
+  // any zoom while preserving borderRadius. Selecting an event then pinching
+  // is rare; this animated layout prop fires only when zoomScale changes.
+  const outlineBorderStyle = useAnimatedStyle(() => ({
+    borderTopWidth: 3 / zoomScale.value,
+    borderBottomWidth: 3 / zoomScale.value,
+    borderRadius: 4 / zoomScale.value,
+  }));
+
   const gesture = Gesture.Tap()
     .runOnJS(true)
     .onTouchesDown(() => {
@@ -173,7 +188,7 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
         animView,
       ]}>
       {selectedEvent && (
-        <View
+        <Animated.View
           style={[
             StyleSheet.absoluteFill,
             theme.eventContainerStyle,
@@ -186,6 +201,7 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
                   : 'transparent'),
               borderColor: theme.primaryColor,
             },
+            outlineBorderStyle,
             containerStyle,
           ]}>
           {renderEvent ? (
@@ -194,41 +210,42 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
               height: eventHeight,
             })
           ) : (
-            <Animated.View style={counterScaleStyle}>
+            <Animated.View
+              style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
               <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
                 {selectedEvent.title}
               </Text>
             </Animated.View>
           )}
-        </View>
+        </Animated.View>
       )}
       <GestureDetector gesture={gesture}>
         <View style={[StyleSheet.absoluteFill, { cursor: 'pointer' }]} />
       </GestureDetector>
       <GestureDetector gesture={topEdgeGesture}>
-        {TopEdgeComponent || (
-          // Phase 1 perf: drag dots no longer counter-scaled.
-          <View
-            style={[
-              styles.dot,
-              styles.dotLeft,
-              numberOfDays === 1 && styles.dotLeftSingle,
-            ]}>
-            <DragDot />
-          </View>
-        )}
+        {/* Default (center) transformOrigin so counter-scale shrinks around
+            the dot's center — keeps its visual center on the event's
+            top/bottom edge regardless of zoom. */}
+        <Animated.View
+          style={[
+            styles.dot,
+            styles.dotLeft,
+            numberOfDays === 1 && styles.dotLeftSingle,
+            counterScaleStyle,
+          ]}>
+          {TopEdgeComponent || <DragDot />}
+        </Animated.View>
       </GestureDetector>
       <GestureDetector gesture={bottomEdgeGesture}>
-        {BottomEdgeComponent || (
-          <View
-            style={[
-              styles.dot,
-              styles.dotRight,
-              numberOfDays === 1 && styles.dotRightSingle,
-            ]}>
-            <DragDot />
-          </View>
-        )}
+        <Animated.View
+          style={[
+            styles.dot,
+            styles.dotRight,
+            numberOfDays === 1 && styles.dotRightSingle,
+            counterScaleStyle,
+          ]}>
+          {BottomEdgeComponent || <DragDot />}
+        </Animated.View>
       </GestureDetector>
     </Animated.View>
   );
@@ -246,9 +263,10 @@ const styles = StyleSheet.create({
     cursor: 'pointer',
   },
   event: {
-    borderRadius: 4,
     overflow: 'hidden',
-    borderWidth: 3,
+    borderLeftWidth: 3,
+    borderRightWidth: 3,
+    // borderRadius supplied by outlineBorderStyle (animated by zoom).
   },
   dotLeft: { top: -12, left: -12 },
   dotRight: { bottom: -12, right: -12 },
