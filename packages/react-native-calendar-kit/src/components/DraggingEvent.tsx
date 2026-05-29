@@ -193,13 +193,24 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
   // Left/right stay 3px (X axis isn't scaled). Drag is mutually exclusive
   // with pinch → zoomScale is constant during drag, so this animated layout
   // prop re-fires at most once per drag mount.
+  // The base radius prefers consumer's `containerStyle.borderRadius`, then
+  // `theme.eventContainerStyle.borderRadius`, then the library default (4).
+  const baseDraggingRadius =
+    typeof (containerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (containerStyle as { borderRadius: number }).borderRadius
+      : typeof (theme.eventContainerStyle as
+          | { borderRadius?: number }
+          | undefined)?.borderRadius === 'number'
+      ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
+      : 4;
   const outlineBorderStyle = useAnimatedStyle(() => ({
     borderTopWidth: 3 / zoomScale.value,
     borderBottomWidth: 3 / zoomScale.value,
     // Counter parent scaleY's effect on borderRadius so the vertical
-    // visual radius stays ~4px at any zoom (RN has no asymmetric X/Y
+    // visual radius stays constant at any zoom (RN has no asymmetric X/Y
     // radii, so horizontal flattens at high zoom).
-    borderRadius: 4 / zoomScale.value,
+    borderRadius: baseDraggingRadius / zoomScale.value,
   }));
 
   return (

@@ -33,8 +33,6 @@ const BodyItem = ({
     spaceFromTop,
     timelineHeight,
     spaceFromBottom,
-    hourWidth,
-    numberOfDays,
     calendarData,
     columns,
   } = useBody();
@@ -54,7 +52,10 @@ const BodyItem = ({
     return data;
   }, [calendarData.visibleDatesArray, columns, pageIndex]);
 
-  const leftSpacing = numberOfDays === 1 ? hourWidth : 0;
+  // TimeColumn now lives at body level in every mode, so day cells no
+  // longer carry it — events content starts at x=0 of the cell regardless
+  // of single-day vs multi-day.
+  const leftSpacing = 0;
 
   const height = useDerivedValue(() => {
     return timelineHeight.value - spaceFromTop - spaceFromBottom;

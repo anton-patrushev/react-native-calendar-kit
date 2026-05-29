@@ -266,10 +266,10 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
   const columnWidth = (calendarLayout.width - hourWidth) / numberOfDays;
 
+  // TimeColumn now renders at body level in every mode (see CalendarBody),
+  // so the grid area always excludes hourWidth.
   const calendarGridWidth = isSingleDay
-    ? isResourceMode
-      ? calendarLayout.width - hourWidth
-      : calendarLayout.width
+    ? calendarLayout.width - hourWidth
     : columnWidth * columns;
 
   const calendarListRef = useRef<CalendarListRef | null>(null);

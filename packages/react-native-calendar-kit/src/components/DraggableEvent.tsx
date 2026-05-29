@@ -132,13 +132,24 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
     };
   }, [resourceIndex]);
 
+  // The base radius prefers consumer's `containerStyle.borderRadius`, then
+  // `theme.eventContainerStyle.borderRadius`, then the library default (4).
+  const baseSelectedRadius =
+    typeof (containerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (containerStyle as { borderRadius: number }).borderRadius
+      : typeof (theme.eventContainerStyle as
+          | { borderRadius?: number }
+          | undefined)?.borderRadius === 'number'
+      ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
+      : 4;
   // Counter-scale top/bottom border widths so the outline stays 3px thick at
   // any zoom while preserving borderRadius. Selecting an event then pinching
   // is rare; this animated layout prop fires only when zoomScale changes.
   const outlineBorderStyle = useAnimatedStyle(() => ({
     borderTopWidth: 3 / zoomScale.value,
     borderBottomWidth: 3 / zoomScale.value,
-    borderRadius: 4 / zoomScale.value,
+    borderRadius: baseSelectedRadius / zoomScale.value,
   }));
 
   const gesture = Gesture.Tap()

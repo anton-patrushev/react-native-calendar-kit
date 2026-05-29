@@ -14,7 +14,6 @@ import {
   forceUpdateZone,
   parseDateTime,
 } from '../../utils/dateUtils';
-import TimeColumn from '../TimeColumn';
 import Touchable from '../Touchable';
 import OutOfRangeView from './OutOfRangeView';
 import UnavailableHours from './UnavailableHours';
@@ -38,7 +37,6 @@ const TimelineBoard = ({
     totalSlots,
     minuteHeight,
     spaceFromTop,
-    hourWidth,
     start,
     columnWidth,
     numberOfDays,
@@ -46,7 +44,6 @@ const TimelineBoard = ({
     columns,
     timelineHeight,
     spaceFromBottom,
-    calendarLayout,
   } = useBody();
   const { timeZone } = useTimezone();
   const colors = useTheme((state) => state.colors);
@@ -165,17 +162,13 @@ const TimelineBoard = ({
 
   return (
     <View style={styles.container}>
-      {numberOfDays === 1 && !resources && (
-        <View style={{ width: hourWidth }}>
-          <TimeColumn />
-        </View>
-      )}
+      {/* TimeColumn moved to body level (CalendarBody) in every mode so it
+          doesn't slide horizontally on day-swipe in single-day mode. */}
       <Animated.View
         style={[
           {
             marginTop: EXTRA_HEIGHT + spaceFromTop,
-            width:
-              numberOfDays === 1 ? calendarLayout.width - hourWidth : '100%',
+            width: '100%',
           },
           contentView,
         ]}>

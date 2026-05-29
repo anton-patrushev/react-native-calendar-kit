@@ -400,7 +400,11 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
         )
       : Gesture.Race(pinchGesture, dragEventGesture, dragToCreateGesture);
 
-  const leftSize = numberOfDays > 1 || !!resources ? hourWidth : 0;
+  // TimeColumn always renders at body level (was conditional on multi-day or
+  // resources before — in single-day mode it lived inside each cell and slid
+  // horizontally on day-swipe, desyncing visually from the body-level lines
+  // overlay).
+  const leftSize = hourWidth;
 
   // Build the horizontal-line list once per slot/showQuarterHourLines change.
   // Lines render inside `horizontalLinesWrapperStyle` (sibling of inner scale
@@ -412,22 +416,30 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   // position them with a negative `left` to peek back into the TimeColumn area.
   const horizontalLines = useMemo(() => {
     const lines: React.ReactNode[] = [];
-    const pushHourTick = (index: number, key: string) => {
-      lines.push(
-        <View
-          key={`tick-${key}`}
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: -HOUR_SHORT_LINE_WIDTH,
-            width: HOUR_SHORT_LINE_WIDTH,
-            height: 1,
-            top: `${(index / totalSlots) * 100}%`,
-            backgroundColor: cellBorderColor,
-          }}
-        />
-      );
-    };
+    // Hour-tick markers are gated on `showTimeColumnRightLine` because they
+    // visually live at the boundary between the TimeColumn and the grid — if
+    // a consumer hides that boundary line, they're not expecting little
+    // hourly dashes there either.
+    const pushHourTick = showTimeColumnRightLine
+      ? (index: number, key: string) => {
+          lines.push(
+            <View
+              key={`tick-${key}`}
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: -HOUR_SHORT_LINE_WIDTH,
+                width: HOUR_SHORT_LINE_WIDTH,
+                height: 1,
+                top: `${(index / totalSlots) * 100}%`,
+                backgroundColor: cellBorderColor,
+              }}
+            />
+          );
+        }
+      : (_index: number, _key: string) => {
+          /* no-op when showTimeColumnRightLine is false */
+        };
     for (let i = 0; i < totalSlots; i++) {
       lines.push(
         <HorizontalLine
@@ -488,6 +500,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     cellBorderColor,
     renderCustomHorizontalLine,
     showQuarterHourLines,
+    showTimeColumnRightLine,
   ]);
 
   const _renderResourceOverlay = useCallback(
@@ -559,7 +572,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                   styles.absolute,
                   { top: -EXTRA_HEIGHT, width: calendarLayout.width },
                 ]}>
-                {(numberOfDays > 1 || !!resources) && <TimeColumn />}
+                <TimeColumn />
                 <View
                   style={[
                     styles.absolute,
