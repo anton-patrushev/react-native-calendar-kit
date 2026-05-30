@@ -10,7 +10,6 @@ import type { DraggableEventProps } from './DraggableEvent';
 import DraggableEvent from './DraggableEvent';
 import Events from './Events';
 import LoadingOverlay from './Loading/Overlay';
-import NowIndicator from './NowIndicator';
 import TimelineBoard from './TimelineBoard';
 import { ResourceItem } from '../types';
 
@@ -88,7 +87,6 @@ const BodyItem = ({
           visibleDates={visibleDates}
           resources={resources}
         />
-        <NowIndicator visibleDates={visibleDates} />
         <DraggableEvent
           startUnix={startUnix}
           visibleDates={visibleDates}

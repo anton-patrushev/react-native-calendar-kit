@@ -20,7 +20,7 @@ import CalendarListView from './components/CalendarListView';
 import DragEventPlaceholder from './components/DraggingEvent';
 import DraggingHour from './components/DraggingHour';
 import TappedSlotIndicator from './components/TappedSlotIndicator';
-import { NowIndicatorResource } from './components/NowIndicator';
+import NowIndicator, { NowIndicatorResource } from './components/NowIndicator';
 import ResourceListView from './components/Resource/ResourceListView';
 import ResourceOverlay from './components/Resource/ResourceOverlay';
 import TimeColumn from './components/TimeColumn';
@@ -638,7 +638,11 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                       { top: EXTRA_HEIGHT + spaceFromTop },
                       styles.dragContainer,
                     ]}>
-                    {enableResourceScroll && <NowIndicatorResource />}
+                    {enableResourceScroll ? (
+                      <NowIndicatorResource />
+                    ) : (
+                      <NowIndicator />
+                    )}
                     <DragEventPlaceholder
                       renderDraggingEvent={renderDraggingEvent}
                       resources={resources}

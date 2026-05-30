@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { SharedValue } from 'react-native-reanimated';
 import Animated, {
@@ -84,34 +84,39 @@ const NowIndicatorInner = ({
   );
 };
 
-const NowIndicator: FC<{
-  visibleDates: Record<string, { diffDays: number; unix: number }>;
-  showDot?: boolean;
-}> = ({ visibleDates, showDot = true }) => {
-  const { showNowIndicator } = useBody();
+// Body-level indicator: renders as a sibling of the horizontal CalendarList
+// but inside the vertical body scroll. It scrolls vertically with the
+// timeline and stays static during horizontal page swipes (chip won't ride
+// off across days). Hidden when the active page does not contain today.
+const NowIndicator: FC<{ showDot?: boolean }> = ({ showDot = true }) => {
+  const { showNowIndicator, hourWidth, columnWidth, columns } = useBody();
   const { currentDateUnix, currentTime } = useNowIndicator();
-  // Track the currently-visible day so the indicator hides on BodyItems
-  // that virtualization keeps mounted in the drawDistance buffer. Without
-  // this, scrolling to a previous day in single-day mode left today's
-  // (off-active-page) BodyItem rendering the indicator, which leaked
-  // into view during/after the horizontal swipe.
   const activeDayUnix = useDateChangedListener();
 
-  const visibleDate = visibleDates[currentDateUnix];
-  // Show only when this BodyItem's visibleDates contains BOTH today AND
-  // the active day. For single-day mode this collapses to "activeDay ===
-  // today". For multi-day mode it means "today is in the active week".
-  const isShowNowIndicator =
-    showNowIndicator && !!visibleDate && !!visibleDates[activeDayUnix];
+  // Today's column index relative to the active page's left-most day.
+  // Negative or >= columns means today is outside the visible page.
+  const dayIndex = useMemo(() => {
+    const dayMs = 86400000;
+    return Math.round((currentDateUnix - activeDayUnix) / dayMs);
+  }, [currentDateUnix, activeDayUnix]);
 
-  if (!isShowNowIndicator) {
+  const inRange = dayIndex >= 0 && dayIndex < columns;
+
+  if (!showNowIndicator || !inRange) {
     return null;
   }
 
+  // Container spans the full body width: chip lands over the TimeColumn
+  // area (x=0..hourWidth) and the consumer's flex:1 line extends across
+  // the entire visible row. Splitting chip vs line into separate slots so
+  // the line only covers today's column would require the consumer to
+  // render them as two components — we keep the single-component contract.
   return (
     <NowIndicatorInner
       currentTime={currentTime}
-      dayIndex={visibleDate.diffDays}
+      dayIndex={0}
+      startLeft={0}
+      width={hourWidth + columns * columnWidth}
       showDot={showDot}
     />
   );
