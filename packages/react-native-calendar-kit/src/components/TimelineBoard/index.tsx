@@ -15,6 +15,7 @@ import {
   parseDateTime,
 } from '../../utils/dateUtils';
 import Touchable from '../Touchable';
+import HorizontalLine from './HorizontalLine';
 import OutOfRangeView from './OutOfRangeView';
 import UnavailableHours from './UnavailableHours';
 import VerticalLine from './VerticalLine';
@@ -44,6 +45,9 @@ const TimelineBoard = ({
     columns,
     timelineHeight,
     spaceFromBottom,
+    showQuarterHourLines,
+    renderCustomHorizontalLine,
+    zoomScale,
   } = useBody();
   const { timeZone } = useTimezone();
   const colors = useTheme((state) => state.colors);
@@ -132,6 +136,77 @@ const TimelineBoard = ({
     height: timelineHeight.value - spaceFromTop - spaceFromBottom,
   }));
 
+  // Single counter-scale wrapper (vs per-line animated styles) — keeps
+  // ~96 lines at 1px and zoom-positioned with one useAnimatedStyle per
+  // BodyItem. translateY simulates scaleY top-origin.
+  const horizontalLinesWrapperStyle = useAnimatedStyle(() => {
+    const totalH = timelineHeight.value - spaceFromTop - spaceFromBottom;
+    const z = zoomScale.value;
+    return {
+      height: totalH * z,
+      transform: [
+        { translateY: (totalH * (1 - z)) / 2 },
+        { scaleY: 1 / z },
+      ],
+    };
+  });
+
+  const horizontalLines = useMemo(() => {
+    const lines: React.ReactNode[] = [];
+    for (let i = 0; i < totalSlots; i++) {
+      lines.push(
+        <HorizontalLine
+          key={i}
+          borderColor={colors.border}
+          index={i}
+          totalSlots={totalSlots}
+          renderCustomHorizontalLine={renderCustomHorizontalLine}
+        />
+      );
+      if (showQuarterHourLines) {
+        lines.push(
+          <HorizontalLine
+            key={`${i}.25`}
+            borderColor={colors.border}
+            index={i + 0.25}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
+      lines.push(
+        <HorizontalLine
+          key={`${i}.5`}
+          borderColor={colors.border}
+          index={i + 0.5}
+          totalSlots={totalSlots}
+          renderCustomHorizontalLine={renderCustomHorizontalLine}
+        />
+      );
+      if (showQuarterHourLines) {
+        lines.push(
+          <HorizontalLine
+            key={`${i}.75`}
+            borderColor={colors.border}
+            index={i + 0.75}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
+    }
+    lines.push(
+      <HorizontalLine
+        key={totalSlots}
+        borderColor={colors.border}
+        index={totalSlots}
+        totalSlots={totalSlots}
+        renderCustomHorizontalLine={renderCustomHorizontalLine}
+      />
+    );
+    return lines;
+  }, [totalSlots, colors.border, renderCustomHorizontalLine, showQuarterHourLines]);
+
   const _renderOutOfRangeView = () => {
     const diffMinDays = Math.floor(
       (calendarData.originalMinDateUnix - dateUnix) / MILLISECONDS_IN_DAY
@@ -189,6 +264,18 @@ const TimelineBoard = ({
         {_renderUnavailableHours()}
         {_renderOutOfRangeView()}
       </Animated.View>
+      {/* Sibling of contentView (not child) — avoids layout clipping when
+          scaled wrapper height exceeds totalH. Paint order at this depth:
+          Unavailable (in contentView) → Lines → Events (in BodyItem). */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.horizontalLines,
+          { top: EXTRA_HEIGHT + spaceFromTop },
+          horizontalLinesWrapperStyle,
+        ]}>
+        {horizontalLines}
+      </Animated.View>
       {(numberOfDays > 1 || !!resources?.length) && _renderVerticalLines}
     </View>
   );
@@ -198,6 +285,12 @@ export default React.memo(TimelineBoard);
 
 const styles = StyleSheet.create({
   container: { flex: 1, flexDirection: 'row' },
+  horizontalLines: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
   calendarGrid: { width: '100%' },
   separator: {
     backgroundColor: '#2D2D2D',

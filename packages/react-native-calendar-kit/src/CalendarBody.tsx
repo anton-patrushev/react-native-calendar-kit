@@ -24,7 +24,6 @@ import NowIndicator, { NowIndicatorResource } from './components/NowIndicator';
 import ResourceListView from './components/Resource/ResourceListView';
 import ResourceOverlay from './components/Resource/ResourceOverlay';
 import TimeColumn from './components/TimeColumn';
-import HorizontalLine from './components/TimelineBoard/HorizontalLine';
 import { EXTRA_HEIGHT, HOUR_SHORT_LINE_WIDTH, ScrollType } from './constants';
 import { useTheme } from './context/ThemeProvider';
 import { useActions } from './context/ActionsProvider';
@@ -171,22 +170,14 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     transform: [{ scaleY: 1 / zoomScale.value }],
   }));
 
-  // Sibling-overlay wrapper for horizontal grid lines.
-  //
-  // Lines used to render inside the scaled inner container with a per-line
-  // counter-scale to undo the parent's vertical stretch. That worked but
-  // produced N nested-transform native commits per pinch frame, which is the
-  // dominant cost of pinch on Fabric. Here, the lines wrapper sits OUTSIDE
-  // the scaled inner — it gets no parent `scaleY`, so its child <View>s stay
-  // 1px tall naturally. Its top/height come from zoomScale via a single
-  // useAnimatedStyle, so all lines reposition together with one commit.
+  // Hour-tick overlay positioning — outside scaled subtree so 1px ticks
+  // stay 1px; one animated style drives all tick positions.
   const horizontalLinesWrapperStyle = useAnimatedStyle(() => ({
     top: spaceFromTop * zoomScale.value,
     height:
       (timelineHeight.value - spaceFromTop - spaceFromBottom) * zoomScale.value,
   }));
 
-  const borderColor = useTheme((state) => state.colors.border);
   const cellBorderColor = useTheme(
     (state) => state.hourBorderColor ?? state.colors.border
   );
@@ -417,99 +408,29 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   // overlay).
   const leftSize = hourWidth;
 
-  // Build the horizontal-line list once per slot/showQuarterHourLines change.
-  // Lines render inside `horizontalLinesWrapperStyle` (sibling of inner scale
-  // container) — see comment on the animated style above.
-  //
-  // Also includes the small hour-tick markers (formerly rendered inside
-  // TimeColumn as `shortLine`). They sit at the right edge of the TimeColumn
-  // — i.e. just to the left of the lines wrapper's left edge — so we
-  // position them with a negative `left` to peek back into the TimeColumn area.
-  const horizontalLines = useMemo(() => {
-    const lines: React.ReactNode[] = [];
-    // Hour-tick markers are gated on `showTimeColumnRightLine` because they
-    // visually live at the boundary between the TimeColumn and the grid —
-    // if a consumer hides that boundary line, they're not expecting little
-    // hourly dashes there either.
-    const pushHourTick = (index: number, key: string) => {
-      if (!showTimeColumnRightLine) return;
-      lines.push(
+  // Hour-tick markers at the TimeColumn/grid boundary. Negative `left`
+  // peeks back into the TimeColumn area. Gated on showTimeColumnRightLine.
+  const hourTicks = useMemo(() => {
+    if (!showTimeColumnRightLine) return null;
+    const ticks: React.ReactNode[] = [];
+    for (let i = 0; i <= totalSlots; i++) {
+      ticks.push(
         <View
-          key={`tick-${key}`}
+          key={`tick-${i}`}
           pointerEvents="none"
           style={{
             position: 'absolute',
             left: -HOUR_SHORT_LINE_WIDTH,
             width: HOUR_SHORT_LINE_WIDTH,
             height: 1,
-            top: `${(index / totalSlots) * 100}%`,
+            top: `${(i / totalSlots) * 100}%`,
             backgroundColor: cellBorderColor,
           }}
         />
       );
-    };
-    for (let i = 0; i < totalSlots; i++) {
-      lines.push(
-        <HorizontalLine
-          key={i}
-          borderColor={borderColor}
-          index={i}
-          totalSlots={totalSlots}
-          renderCustomHorizontalLine={renderCustomHorizontalLine}
-        />
-      );
-      pushHourTick(i, String(i));
-      if (showQuarterHourLines) {
-        lines.push(
-          <HorizontalLine
-            key={`${i}.25`}
-            borderColor={borderColor}
-            index={i + 0.25}
-            totalSlots={totalSlots}
-            renderCustomHorizontalLine={renderCustomHorizontalLine}
-          />
-        );
-      }
-      lines.push(
-        <HorizontalLine
-          key={`${i}.5`}
-          borderColor={borderColor}
-          index={i + 0.5}
-          totalSlots={totalSlots}
-          renderCustomHorizontalLine={renderCustomHorizontalLine}
-        />
-      );
-      if (showQuarterHourLines) {
-        lines.push(
-          <HorizontalLine
-            key={`${i}.75`}
-            borderColor={borderColor}
-            index={i + 0.75}
-            totalSlots={totalSlots}
-            renderCustomHorizontalLine={renderCustomHorizontalLine}
-          />
-        );
-      }
     }
-    lines.push(
-      <HorizontalLine
-        key={totalSlots}
-        borderColor={borderColor}
-        index={totalSlots}
-        totalSlots={totalSlots}
-        renderCustomHorizontalLine={renderCustomHorizontalLine}
-      />
-    );
-    pushHourTick(totalSlots, String(totalSlots));
-    return lines;
-  }, [
-    totalSlots,
-    borderColor,
-    cellBorderColor,
-    renderCustomHorizontalLine,
-    showQuarterHourLines,
-    showTimeColumnRightLine,
-  ]);
+    return ticks;
+  }, [totalSlots, cellBorderColor, showTimeColumnRightLine]);
 
   const _renderResourceOverlay = useCallback(
     (props: { totalSize: number; resources: ResourceItem[] }) => {
@@ -552,23 +473,23 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                 },
                 outerSpacerStyle,
               ]}>
-              {/* Horizontal grid lines overlay — sibling of innerScaleStyle so
-                  it receives NO parent scaleY. Lines stay 1px regardless of
-                  zoom; their positions track zoom via the wrapper's animated
-                  top/height. Rendered before the scaled container so events
-                  paint on top. */}
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.absolute,
-                  {
-                    left: hourWidth,
-                    width: calendarLayout.width - hourWidth,
-                  },
-                  horizontalLinesWrapperStyle,
-                ]}>
-                {horizontalLines}
-              </Animated.View>
+              {/* Hour-tick overlay (body-level, outside scaled subtree).
+                  Grid lines themselves moved into TimelineBoard to paint
+                  over UnavailableHours. */}
+              {hourTicks && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.absolute,
+                    {
+                      left: hourWidth,
+                      width: calendarLayout.width - hourWidth,
+                    },
+                    horizontalLinesWrapperStyle,
+                  ]}>
+                  {hourTicks}
+                </Animated.View>
+              )}
               {/* Inner scale container: GPU-accelerated scaleY transform */}
               <Animated.View
                 style={[{ width: calendarLayout.width }, innerScaleStyle]}>
