@@ -74,13 +74,30 @@ const usePinchToZoom = () => {
 
   useAnimatedReaction(
     () => ({ s: scrollOffsetLive.value, t: pinchEndTarget.value }),
-    ({ s, t }) => {
+    (curr, prev) => {
       'worklet';
-      if (!Number.isNaN(t) && Math.abs(s - t) < 0.5) {
+      if (Number.isNaN(curr.t)) return;
+      // Skip the same UI tick that armed the target. Without this guard,
+      // if scrollOffsetLive happens to already be near targetOffset (e.g.
+      // tiny pinches at clamped bounds, or the calculated target equals
+      // current scroll), the reaction fires immediately on the arming
+      // tick and clears the delta BEFORE the native scrollTo has had a
+      // chance to move — producing a visible snap.
+      if (!prev || Number.isNaN(prev.t)) return;
+      // Detect "arrived" either by passing through the target (sign
+      // change of (s - t)) OR by being within a tolerance window. On
+      // Android with sparse scroll events, the live offset can step from
+      // before to past the target in one emission, never landing inside
+      // a tight tolerance — `crossed` catches that case. The tolerance
+      // is widened to 2px (from 0.5px) to absorb sub-pixel jitter on
+      // both platforms.
+      const crossed = (prev.s - curr.t) * (curr.s - curr.t) <= 0;
+      const within = Math.abs(curr.s - curr.t) < 2;
+      if (crossed || within) {
         // Scroll has arrived at the gesture-end target. Re-baseline so
         // subsequent vertical scrolls don't keep auto-compensating, and
         // clear the delta so translateY becomes zoom-only.
-        startOffsetY.value = s;
+        startOffsetY.value = curr.s;
         pinchScrollDelta.value = 0;
         pinchEndTarget.value = Number.NaN;
       }
@@ -97,6 +114,19 @@ const usePinchToZoom = () => {
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
       pinchScrollDelta.value = 0;
+      // Defensive reset of gesture-end state. If a prior gesture's
+      // arrival reaction never fired (e.g. sparse Android scroll events
+      // overshot the tolerance window), pinchEndTarget would still be a
+      // finite number — the residual term in innerScaleStyle would then
+      // compute against the PREVIOUS gesture's pinchStartOffsetY and
+      // produce a visible jump on this new gesture. Clear here so each
+      // gesture starts from a clean state.
+      pinchEndTarget.value = Number.NaN;
+      // Also reset isSettling so a cancelled spring's dropped completion
+      // callback (Reanimated v4 + Android: callbacks may not fire when
+      // cancelAnimation interrupts withSpring) can't leave the flag
+      // stuck true across gestures.
+      isSettling.value = false;
       isPinching.value = true;
     })
     .runOnJS(false)
@@ -143,16 +173,18 @@ const usePinchToZoom = () => {
       // direction is inverted: a positive scroll target (content moves
       // up under the viewport) corresponds to a negative translateY.
       //
-      // Use the LIVE scroll offset (not the gesture-start snapshot) so
-      // any native scroll drift that happens during the pinch is
-      // absorbed into the delta. On iOS where the scroll position is
-      // stable through the pinch, scrollOffsetLive ≡ startOffsetY and
-      // this is equivalent to the snapshot. On Android — where the OS
-      // can let finger movement leak into native scroll alongside the
-      // pinch — `scrollOffsetLive` drifts, and using it here keeps the
-      // formula self-consistent so the gesture-end transition lands
-      // without a visible jump.
-      pinchScrollDelta.value = scrollOffsetLive.value - newOffsetY;
+      // Use the gesture-start SNAPSHOT (not the live scroll offset). An
+      // earlier experiment fed `scrollOffsetLive` directly here on the
+      // theory that absorbing native-scroll drift would cure the
+      // Android gesture-end jump. It made shake during the pinch worse
+      // instead: on Android, `simultaneousHandlers={pinchGestureRef}`
+      // intentionally lets the native ScrollView scroll concurrently
+      // with the pinch, and Android scroll events arrive on a sparse
+      // bursty cadence — `scrollOffsetLive` lurches between samples,
+      // which gets translated 1:1 into translateY. The scroll-lock
+      // (added below in CalendarBody) is what actually prevents the
+      // drift; this formula must stay snapshot-based.
+      pinchScrollDelta.value = startOffsetY.value - newOffsetY;
       lastScale.value = newGestureScale;
     })
     .onEnd(() => {
@@ -192,17 +224,6 @@ const usePinchToZoom = () => {
           }
         );
       }
-
-      // Re-anchor pinchStartOffsetY (== startOffsetY) to the live scroll
-      // position at gesture end. The auto-compensate residual in
-      // innerScaleStyle is `(scrollOffsetLive - pinchStartOffsetY)`; by
-      // pinning the start to "now," the residual is 0 at this instant
-      // and grows smoothly to (targetOffset - liveAtEnd) as scrollTo
-      // animates the native ScrollView in. Without this, on Android
-      // where the live offset can drift away from the gesture-start
-      // snapshot, the residual was non-zero at end and showed as a
-      // visible jump on release.
-      startOffsetY.value = scrollOffsetLive.value;
 
       offsetY.value = targetOffset;
       scrollTo(verticalListRef, 0, targetOffset, false);

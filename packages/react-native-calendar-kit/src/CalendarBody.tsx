@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -11,6 +11,8 @@ import {
   ScrollView,
 } from 'react-native-gesture-handler';
 import Animated, {
+  runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
 } from 'react-native-reanimated';
@@ -160,6 +162,63 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     pinchStartOffsetY,
     pinchEndTarget,
   } = usePinchToZoom();
+
+  // Lock vertical ScrollView during pinch so finger movement that the
+  // OS routes to the underlying pan-gesture (alongside the pinch)
+  // doesn't sneak in as native scroll. Without this, scrollOffsetLive
+  // drifts mid-pinch — on Android especially, where
+  // `simultaneousHandlers={pinchGestureRef}` lets the native scroll fire
+  // concurrently with the pinch — which throws off the focal-anchor
+  // math and leaves a residual offset at gesture end.
+  //
+  // An earlier version of this lock toggled `scrollEnabled` directly
+  // off `isPinching` in a useAnimatedReaction, but flipping it from
+  // false→true mid-touch on Android wedged the ScrollView's touch
+  // dispatcher (vertical scroll dead until next fresh ACTION_DOWN). To
+  // unwedge: re-enable on a `setTimeout(0)` post-pinch so the
+  // re-enable lands AFTER the touch event lifecycle has completed on
+  // Android, giving the native dispatcher a clean boundary.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const scrollReEnableTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  useEffect(
+    () => () => {
+      if (scrollReEnableTimer.current !== null) {
+        clearTimeout(scrollReEnableTimer.current);
+      }
+    },
+    []
+  );
+  const enableScrollAfterPinch = useCallback(() => {
+    if (scrollReEnableTimer.current !== null) {
+      clearTimeout(scrollReEnableTimer.current);
+    }
+    // Defer past the touch event boundary so Android doesn't wedge.
+    // On iOS the timeout is harmless and the lock works either way.
+    scrollReEnableTimer.current = setTimeout(() => {
+      scrollReEnableTimer.current = null;
+      setScrollEnabled(true);
+    }, 0);
+  }, []);
+  const disableScrollDuringPinch = useCallback(() => {
+    if (scrollReEnableTimer.current !== null) {
+      clearTimeout(scrollReEnableTimer.current);
+      scrollReEnableTimer.current = null;
+    }
+    setScrollEnabled(false);
+  }, []);
+  useAnimatedReaction(
+    () => isPinching.value,
+    (current, previous) => {
+      if (current === previous || previous === null) return;
+      if (current) {
+        runOnJS(disableScrollDuringPinch)();
+      } else {
+        runOnJS(enableScrollAfterPinch)();
+      }
+    }
+  );
 
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({
@@ -500,6 +559,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
           ref={verticalListRef}
           scrollEventThrottle={16}
           pinchGestureEnabled={false}
+          scrollEnabled={scrollEnabled}
           showsVerticalScrollIndicator={false}
           onLayout={_onLayout}
           onScroll={_onScroll}
