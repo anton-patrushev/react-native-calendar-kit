@@ -5,7 +5,9 @@ import {
   cancelAnimation,
   scrollTo,
   useSharedValue,
+  withDelay,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
 import { useCalendar } from '../context/CalendarProvider';
 import { clampValues } from '../utils/utils';
@@ -156,7 +158,18 @@ const usePinchToZoom = () => {
 
       offsetY.value = targetOffset;
       scrollTo(verticalListRef, 0, targetOffset, false);
-      pinchScrollDelta.value = 0;
+
+      // Defer the delta reset by one frame so the native scrollTo above
+      // has time to land before we drop the translateY compensation. On
+      // Fabric, scrollTo dispatches a native scroll command that lands
+      // ~1 frame later, while a direct `pinchScrollDelta.value = 0` write
+      // propagates immediately to innerScaleStyle. Resetting instantly
+      // produces a one-frame visual jump (a few pixels down on zoom-in,
+      // up on zoom-out) because the transform drops its delta before the
+      // ScrollView's contentOffset catches up. withDelay(16) holds the
+      // delta and withTiming(0, duration:0) snaps to 0 once the delay
+      // expires — by which point the native scroll has committed.
+      pinchScrollDelta.value = withDelay(16, withTiming(0, { duration: 0 }));
 
       // Reset gesture scale trackers (NOT zoomScale — it persists)
       lastScale.value = 1;
