@@ -40,6 +40,19 @@ const usePinchToZoom = () => {
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
 
+  // Pinch-time scroll compensation. During a pinch we DON'T call
+  // scrollTo every frame (that triggers a separate native scroll commit
+  // which races the inner-scale transform commit on Fabric and produces
+  // a visible shake of the scrollable surface). Instead we accumulate
+  // the focal-anchor delta here and let CalendarBody fold it into the
+  // inner-scale's translateY in the same animated style as the scaleY.
+  // Single commit per frame on the inner-scale node.
+  //
+  // At gesture end we snap the real ScrollView contentOffset to the
+  // accumulated position via a single scrollTo, then reset this back
+  // to 0.
+  const pinchScrollDelta = useSharedValue(0);
+
   const pinchGesture = Gesture.Pinch()
     .onBegin(({ focalY }) => {
       // Cancel any in-flight overscroll spring from a previous gesture.
@@ -49,6 +62,7 @@ const usePinchToZoom = () => {
       startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
+      pinchScrollDelta.value = 0;
       isPinching.value = true;
     })
     .runOnJS(false)
@@ -89,8 +103,12 @@ const usePinchToZoom = () => {
         anchorFrac * timelineHeight.value * clampedZoomScale -
         startFocalY.value;
 
-      offsetY.value = newOffsetY;
-      scrollTo(verticalListRef, 0, newOffsetY, false);
+      // Apply the focal-anchor scroll movement as a translateY on the
+      // inner-scale wrapper instead of moving the real ScrollView. See
+      // the pinchScrollDelta declaration above for why. The transform
+      // direction is inverted: a positive scroll target (content moves
+      // up under the viewport) corresponds to a negative translateY.
+      pinchScrollDelta.value = startOffsetY.value - newOffsetY;
       lastScale.value = newGestureScale;
     })
     .onEnd(() => {
@@ -100,12 +118,20 @@ const usePinchToZoom = () => {
         minZoomScale,
         maxZoomScale
       );
+      // Commit the accumulated pinch-time scroll translateY back into the
+      // real ScrollView contentOffset, then zero out the delta. From the
+      // user's POV nothing changes visually — translateY going from -X
+      // back to 0 happens in the same UI tick as scrollTo lands at X.
+      // (Reanimated batches both writes into a single commit.)
+      const liveOffsetY = startOffsetY.value - pinchScrollDelta.value;
+      let targetOffset = liveOffsetY;
+
       if (finalZoomScale !== zoomScale.value) {
         // Recompute target offset using the same anchor from gesture start
         const anchorContentY = startFocalY.value + startOffsetY.value;
         const anchorFrac =
           anchorContentY / (timelineHeight.value * startZoomScale.value);
-        const targetOffset =
+        targetOffset =
           anchorFrac * timelineHeight.value * finalZoomScale -
           startFocalY.value;
 
@@ -126,9 +152,12 @@ const usePinchToZoom = () => {
             isSettling.value = false;
           }
         );
-        offsetY.value = targetOffset;
-        scrollTo(verticalListRef, 0, targetOffset, false);
       }
+
+      offsetY.value = targetOffset;
+      scrollTo(verticalListRef, 0, targetOffset, false);
+      pinchScrollDelta.value = 0;
+
       // Reset gesture scale trackers (NOT zoomScale — it persists)
       lastScale.value = 1;
       startScale.value = 1;
@@ -202,7 +231,7 @@ const usePinchToZoom = () => {
     };
   }, [onWheel, verticalListRef]);
 
-  return { pinchGesture, pinchGestureRef, isPinching };
+  return { pinchGesture, pinchGestureRef, isPinching, pinchScrollDelta };
 };
 
 export default usePinchToZoom;

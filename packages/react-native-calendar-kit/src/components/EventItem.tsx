@@ -257,9 +257,12 @@ const EventItem: FC<EventItemProps> = ({
       ?.borderRadius === 'number'
       ? ((theme.eventContainerStyle as { borderRadius: number }).borderRadius)
       : 2;
-  const borderRadiusStyle = useAnimatedStyle(() => ({
-    borderRadius: baseBorderRadius / zoomScale.value,
-  }));
+  // Static base radius — no per-event animated counter-scale. At high
+  // zoom the corner curve elongates slightly along Y (RN can't express
+  // asymmetric X/Y radii under scaleY), which is a tiny visual artifact
+  // accepted in exchange for eliminating N per-event transform commits
+  // per pinch frame.
+  const borderRadiusStyle = { borderRadius: baseBorderRadius };
 
   // Compute overlap border style
   const overlapBorderStyle = useMemo(() => {

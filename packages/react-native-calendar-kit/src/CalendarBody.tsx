@@ -147,27 +147,58 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
+  // usePinchToZoom owns `pinchScrollDelta` (read by innerScaleStyle
+  // below). It must be called BEFORE the animated styles that capture
+  // it in their worklets — those styles' closures resolve `undefined`
+  // and crash with "Cannot read property 'value' of undefined" if the
+  // hook is below.
+  const { pinchGesture, pinchGestureRef, isPinching, pinchScrollDelta } =
+    usePinchToZoom();
+
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value * zoomScale.value,
   }));
 
-  // Inner container: GPU-accelerated scaleY transform.
-  // The translateY simulates transformOrigin: '0% 0%' (top-left) by
-  // compensating for the default center-origin scaling. This is more
-  // reliable than transformOrigin across platforms (Android may ignore
-  // transformOrigin when it's in a separate style object from transform).
+  // Inner container's transform composes two pieces of vertical motion
+  // into a single commit per pinch frame:
+  //  1) `(timelineHeight/2)*(Z-1)` — simulates top-origin scaleY (so the
+  //     content scales from the top instead of the default center).
+  //     More reliable than transformOrigin across platforms (Android may
+  //     ignore transformOrigin when it's in a separate style object).
+  //  2) `pinchScrollDelta` — the focal-anchor scroll movement applied as
+  //     translateY instead of a per-frame scrollTo on the ScrollView.
+  //     See the comment in usePinchToZoom for why.
+  // Outside a pinch `pinchScrollDelta.value === 0` so this is a no-op.
   const innerScaleStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value,
     transform: [
-      { translateY: (timelineHeight.value / 2) * (zoomScale.value - 1) },
+      {
+        translateY:
+          (timelineHeight.value / 2) * (zoomScale.value - 1) +
+          pinchScrollDelta.value,
+      },
       { scaleY: zoomScale.value },
     ],
   }));
 
-  // Counter-scale style shared across all children via BodyContext
+  // Stepped counter-scale source. `counterScaleStyle` is consumed by 100+
+  // nodes during a pinch — every hour/half/quarter label in TimeColumn,
+  // every event title, NowIndicator, drag overlays. If the style reads
+  // `zoomScale.value` directly, EVERY consumer's transform commits on
+  // every pinch frame (~60 Hz × ~100 nodes = thousands of native
+  // commits/sec on UI thread).
+  //
+  // Route through a stepped useDerivedValue so the value only changes at
+  // ~0.1 zoom increments. Consumers' useAnimatedStyle worklets are
+  // dep-tracked on this SV — they re-fire ONLY when the stepped value
+  // changes, not every frame. Counter-scale "steps" through the zoom
+  // range in 10% increments (visually imperceptible during pinch).
+  const counterScaleSteppedSV = useDerivedValue(() => {
+    return Math.round(zoomScale.value * 10) / 10;
+  });
   const counterScaleStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleY: 1 / zoomScale.value }],
+    transform: [{ scaleY: 1 / counterScaleSteppedSV.value }],
   }));
 
   // Hour-tick overlay positioning — outside scaled subtree so 1px ticks
@@ -181,8 +212,6 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   const cellBorderColor = useTheme(
     (state) => state.hourBorderColor ?? state.colors.border
   );
-
-  const { pinchGesture, pinchGestureRef, isPinching } = usePinchToZoom();
   const dragEventGesture = useDragEventGesture();
   const dragToCreateGesture = useDragToCreateGesture({
     mode: dragToCreateMode,

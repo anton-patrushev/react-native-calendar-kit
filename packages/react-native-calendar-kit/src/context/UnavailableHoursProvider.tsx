@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
 } from 'react';
 import useLazyRef from '../hooks/useLazyRef';
 import { useSyncExternalStoreWithSelector } from '../hooks/useSyncExternalStoreWithSelector';
@@ -88,6 +89,27 @@ const UnavailableHoursProvider: FC<
   ).current;
   const currentDate = useDateChangedListener();
 
+  // Tracks the input set the cached unavailable-hours map was built
+  // against. Same gating pattern as EventsProvider — see comment there.
+  // The day-walk loop here is O(window days) which is small, but the
+  // hot path also writes a new Record to the store on every call,
+  // which fires every downstream useSyncExternalStore selector. Skip
+  // the write when the new center is still well inside the cached
+  // window and inputs haven't changed.
+  const lastProcessed = useRef<{
+    unavailableHours: unknown;
+    timeZone: string | undefined;
+    pagesPerSide: number | undefined;
+    minMs: number;
+    maxMs: number;
+  }>({
+    unavailableHours: undefined,
+    timeZone: undefined,
+    pagesPerSide: undefined,
+    minMs: 0,
+    maxMs: 0,
+  });
+
   const notifyDataChanged = useCallback(
     (date: number, offset: number = 7) => {
       const originalData: Record<string, UnavailableHourProps[]> =
@@ -113,12 +135,39 @@ const UnavailableHoursProvider: FC<
       // Instead, extract the correct ISO date first (in device TZ, matching
       // what the calendar columns display), then build the range in business TZ.
       const baseDateIso = parseDateTime(date).toISODate();
-      let startDateTime = parseDateTime(baseDateIso, { zone: timeZone }).minus({
+      const minDt = parseDateTime(baseDateIso, { zone: timeZone }).minus({
         days: offset * pagesPerSide,
       });
-      const endDateTime = parseDateTime(baseDateIso, { zone: timeZone }).plus({
+      const maxDt = parseDateTime(baseDateIso, { zone: timeZone }).plus({
         days: offset * (pagesPerSide + 1),
       });
+      const newMinMs = minDt.toMillis();
+      const newMaxMs = maxDt.toMillis();
+
+      const cached = lastProcessed.current;
+      const sameInputs =
+        cached.unavailableHours === unavailableHours &&
+        cached.timeZone === timeZone &&
+        cached.pagesPerSide === pagesPerSide;
+      const offsetMs = offset * 86400000;
+      const marginMs = offsetMs;
+      if (
+        sameInputs &&
+        newMinMs + marginMs >= cached.minMs &&
+        newMaxMs - marginMs <= cached.maxMs
+      ) {
+        return;
+      }
+      lastProcessed.current = {
+        unavailableHours,
+        timeZone,
+        pagesPerSide,
+        minMs: newMinMs,
+        maxMs: newMaxMs,
+      };
+
+      let startDateTime = minDt;
+      const endDateTime = maxDt;
 
       while (startDateTime <= endDateTime) {
         // weekDay and dateStr are now correct in business timezone
