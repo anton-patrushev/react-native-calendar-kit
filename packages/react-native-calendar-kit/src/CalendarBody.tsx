@@ -147,37 +147,22 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
-  // usePinchToZoom owns `pinchScrollDelta` (read by innerScaleStyle
-  // below). It must be called BEFORE the animated styles that capture
-  // it in their worklets — those styles' closures resolve `undefined`
-  // and crash with "Cannot read property 'value' of undefined" if the
-  // hook is below.
-  const { pinchGesture, pinchGestureRef, isPinching, pinchScrollDelta } =
-    usePinchToZoom();
+  const { pinchGesture, pinchGestureRef, isPinching } = usePinchToZoom();
 
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value * zoomScale.value,
   }));
 
-  // Inner container's transform composes two pieces of vertical motion
-  // into a single commit per pinch frame:
-  //  1) `(timelineHeight/2)*(Z-1)` — simulates top-origin scaleY (so the
-  //     content scales from the top instead of the default center).
-  //     More reliable than transformOrigin across platforms (Android may
-  //     ignore transformOrigin when it's in a separate style object).
-  //  2) `pinchScrollDelta` — the focal-anchor scroll movement applied as
-  //     translateY instead of a per-frame scrollTo on the ScrollView.
-  //     See the comment in usePinchToZoom for why.
-  // Outside a pinch `pinchScrollDelta.value === 0` so this is a no-op.
+  // Inner container: GPU-accelerated scaleY transform.
+  // The translateY simulates transformOrigin: '0% 0%' (top-left) by
+  // compensating for the default center-origin scaling. This is more
+  // reliable than transformOrigin across platforms (Android may ignore
+  // transformOrigin when it's in a separate style object from transform).
   const innerScaleStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value,
     transform: [
-      {
-        translateY:
-          (timelineHeight.value / 2) * (zoomScale.value - 1) +
-          pinchScrollDelta.value,
-      },
+      { translateY: (timelineHeight.value / 2) * (zoomScale.value - 1) },
       { scaleY: zoomScale.value },
     ],
   }));
