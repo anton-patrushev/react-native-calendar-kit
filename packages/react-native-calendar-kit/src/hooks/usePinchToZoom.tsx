@@ -4,6 +4,8 @@ import type { GestureType } from 'react-native-gesture-handler';
 import {
   cancelAnimation,
   scrollTo,
+  useAnimatedReaction,
+  useScrollViewOffset,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
@@ -48,10 +50,42 @@ const usePinchToZoom = () => {
   // inner-scale's translateY in the same animated style as the scaleY.
   // Single commit per frame on the inner-scale node.
   //
-  // At gesture end we snap the real ScrollView contentOffset to the
-  // accumulated position via a single scrollTo, then reset this back
-  // to 0.
+  // At gesture end we DO NOT reset this to 0 instantly — that produces
+  // a one-frame visual jump because the SV write propagates to
+  // innerScaleStyle before the native scrollTo lands. Instead, the
+  // formula in innerScaleStyle reads from `scrollOffsetLive` (the
+  // ScrollView's live contentOffset) and a transition residual that
+  // auto-decreases as the scroll catches up. Once the scroll arrives at
+  // its target, the reaction below re-baselines `startOffsetY` and
+  // resets `pinchScrollDelta` — atomically in one worklet tick.
   const pinchScrollDelta = useSharedValue(0);
+
+  // Live scroll position from the ScrollView. This SV updates as native
+  // scroll commits land. innerScaleStyle reads from it to compensate
+  // the pinch-end transition in sync with whichever frame the native
+  // scroll lands on.
+  const scrollOffsetLive = useScrollViewOffset(verticalListRef);
+
+  // Gesture-end transition state. When set, innerScaleStyle's translateY
+  // includes a residual term that auto-decreases as `scrollOffsetLive`
+  // approaches `pinchEndTarget`. When the scroll arrives, the reaction
+  // below re-baselines startOffsetY + clears the delta.
+  const pinchEndTarget = useSharedValue(Number.NaN);
+
+  useAnimatedReaction(
+    () => ({ s: scrollOffsetLive.value, t: pinchEndTarget.value }),
+    ({ s, t }) => {
+      'worklet';
+      if (!Number.isNaN(t) && Math.abs(s - t) < 0.5) {
+        // Scroll has arrived at the gesture-end target. Re-baseline so
+        // subsequent vertical scrolls don't keep auto-compensating, and
+        // clear the delta so translateY becomes zoom-only.
+        startOffsetY.value = s;
+        pinchScrollDelta.value = 0;
+        pinchEndTarget.value = Number.NaN;
+      }
+    }
+  );
 
   const pinchGesture = Gesture.Pinch()
     .onBegin(({ focalY }) => {
@@ -156,7 +190,13 @@ const usePinchToZoom = () => {
 
       offsetY.value = targetOffset;
       scrollTo(verticalListRef, 0, targetOffset, false);
-      pinchScrollDelta.value = 0;
+      // Arm the settle reaction. Once the native scroll lands at
+      // `targetOffset` (typically next frame), the reaction will
+      // re-baseline startOffsetY and zero pinchScrollDelta — atomically
+      // with the scroll arrival. Until then, innerScaleStyle's translateY
+      // auto-compensates via the live scroll position so visual stays
+      // constant through the transition.
+      pinchEndTarget.value = targetOffset;
 
       // Reset gesture scale trackers (NOT zoomScale — it persists)
       lastScale.value = 1;
@@ -231,7 +271,15 @@ const usePinchToZoom = () => {
     };
   }, [onWheel, verticalListRef]);
 
-  return { pinchGesture, pinchGestureRef, isPinching, pinchScrollDelta };
+  return {
+    pinchGesture,
+    pinchGestureRef,
+    isPinching,
+    pinchScrollDelta,
+    scrollOffsetLive,
+    pinchStartOffsetY: startOffsetY,
+    pinchEndTarget,
+  };
 };
 
 export default usePinchToZoom;
