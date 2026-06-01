@@ -147,13 +147,19 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
-  // usePinchToZoom owns `pinchScrollDelta` (read by innerScaleStyle
-  // below). It must be called BEFORE the animated styles that capture
-  // it in their worklets — those styles' closures resolve `undefined`
-  // and crash with "Cannot read property 'value' of undefined" if the
-  // hook is below.
-  const { pinchGesture, pinchGestureRef, isPinching, pinchScrollDelta } =
-    usePinchToZoom();
+  // usePinchToZoom owns the pinch SharedValues read by innerScaleStyle
+  // below. It must be called BEFORE the animated styles that capture
+  // them — closures resolve `undefined` and crash with "Cannot read
+  // property 'value' of undefined" if the hook is below.
+  const {
+    pinchGesture,
+    pinchGestureRef,
+    isPinching,
+    pinchScrollDelta,
+    scrollOffsetLive,
+    pinchStartOffsetY,
+    pinchEndTarget,
+  } = usePinchToZoom();
 
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({
@@ -166,17 +172,31 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   //     content scales from the top instead of the default center).
   //     More reliable than transformOrigin across platforms (Android may
   //     ignore transformOrigin when it's in a separate style object).
-  //  2) `pinchScrollDelta` — the focal-anchor scroll movement applied as
-  //     translateY instead of a per-frame scrollTo on the ScrollView.
-  //     See the comment in usePinchToZoom for why.
-  // Outside a pinch `pinchScrollDelta.value === 0` so this is a no-op.
+  //  2) `pinchScrollDelta` plus a transition residual — the focal-anchor
+  //     scroll movement applied as translateY instead of a per-frame
+  //     scrollTo. During pinch, `scrollOffsetLive` equals
+  //     `pinchStartOffsetY` (no scroll moved) so the residual is 0 and
+  //     the translateY term is just `pinchScrollDelta`. At gesture end
+  //     `pinchEndTarget` is armed and we call scrollTo — as the native
+  //     scroll catches up to `startOffsetY - delta`, the residual
+  //     `(scrollOffsetLive - pinchStartOffsetY)` auto-decreases the
+  //     translateY contribution synchronously with the scroll commit,
+  //     so visual position stays constant through the transition.
+  //     The residual only applies while `pinchEndTarget` is armed
+  //     (i.e., during the settle window); after the settle reaction in
+  //     usePinchToZoom re-baselines pinchStartOffsetY + clears the
+  //     delta + clears pinchEndTarget, the residual collapses to 0 so
+  //     subsequent vertical scrolls don't keep auto-compensating.
   const innerScaleStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value,
     transform: [
       {
         translateY:
           (timelineHeight.value / 2) * (zoomScale.value - 1) +
-          pinchScrollDelta.value,
+          pinchScrollDelta.value +
+          (Number.isNaN(pinchEndTarget.value)
+            ? 0
+            : scrollOffsetLive.value - pinchStartOffsetY.value),
       },
       { scaleY: zoomScale.value },
     ],
