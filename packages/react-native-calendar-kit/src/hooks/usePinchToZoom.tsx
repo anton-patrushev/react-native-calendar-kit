@@ -142,7 +142,17 @@ const usePinchToZoom = () => {
       // the pinchScrollDelta declaration above for why. The transform
       // direction is inverted: a positive scroll target (content moves
       // up under the viewport) corresponds to a negative translateY.
-      pinchScrollDelta.value = startOffsetY.value - newOffsetY;
+      //
+      // Use the LIVE scroll offset (not the gesture-start snapshot) so
+      // any native scroll drift that happens during the pinch is
+      // absorbed into the delta. On iOS where the scroll position is
+      // stable through the pinch, scrollOffsetLive ≡ startOffsetY and
+      // this is equivalent to the snapshot. On Android — where the OS
+      // can let finger movement leak into native scroll alongside the
+      // pinch — `scrollOffsetLive` drifts, and using it here keeps the
+      // formula self-consistent so the gesture-end transition lands
+      // without a visible jump.
+      pinchScrollDelta.value = scrollOffsetLive.value - newOffsetY;
       lastScale.value = newGestureScale;
     })
     .onEnd(() => {
@@ -152,23 +162,18 @@ const usePinchToZoom = () => {
         minZoomScale,
         maxZoomScale
       );
-      // Commit the accumulated pinch-time scroll translateY back into the
-      // real ScrollView contentOffset, then zero out the delta. From the
-      // user's POV nothing changes visually — translateY going from -X
-      // back to 0 happens in the same UI tick as scrollTo lands at X.
-      // (Reanimated batches both writes into a single commit.)
-      const liveOffsetY = startOffsetY.value - pinchScrollDelta.value;
-      let targetOffset = liveOffsetY;
+
+      // Recompute target offset from focal-anchor math (independent of
+      // pinchScrollDelta). The pinchScrollDelta shortcut was tied to
+      // snapshot semantics and stopped being meaningful once we switched
+      // onUpdate to use the live scroll offset.
+      const anchorContentY = startFocalY.value + startOffsetY.value;
+      const anchorFrac =
+        anchorContentY / (timelineHeight.value * startZoomScale.value);
+      const targetOffset =
+        anchorFrac * timelineHeight.value * finalZoomScale - startFocalY.value;
 
       if (finalZoomScale !== zoomScale.value) {
-        // Recompute target offset using the same anchor from gesture start
-        const anchorContentY = startFocalY.value + startOffsetY.value;
-        const anchorFrac =
-          anchorContentY / (timelineHeight.value * startZoomScale.value);
-        targetOffset =
-          anchorFrac * timelineHeight.value * finalZoomScale -
-          startFocalY.value;
-
         // Flag the settle window so CalendarContainer defers
         // onZoomChange until the spring completes — otherwise the
         // intermediate percent ticks during the spring would land on the
@@ -187,6 +192,17 @@ const usePinchToZoom = () => {
           }
         );
       }
+
+      // Re-anchor pinchStartOffsetY (== startOffsetY) to the live scroll
+      // position at gesture end. The auto-compensate residual in
+      // innerScaleStyle is `(scrollOffsetLive - pinchStartOffsetY)`; by
+      // pinning the start to "now," the residual is 0 at this instant
+      // and grows smoothly to (targetOffset - liveAtEnd) as scrollTo
+      // animates the native ScrollView in. Without this, on Android
+      // where the live offset can drift away from the gesture-start
+      // snapshot, the residual was non-zero at end and showed as a
+      // visible jump on release.
+      startOffsetY.value = scrollOffsetLive.value;
 
       offsetY.value = targetOffset;
       scrollTo(verticalListRef, 0, targetOffset, false);
