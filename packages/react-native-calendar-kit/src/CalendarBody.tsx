@@ -169,10 +169,17 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   // pinch — which throws off the focal-anchor math and can leave a
   // residual offset at gesture end. Bridging via React state is fine
   // here: scrollEnabled only flips twice per pinch (begin/end).
+  //
+  // iOS only: on Android, toggling scrollEnabled false→true mid-touch
+  // leaves the native ScrollView in a state where subsequent vertical
+  // pans don't register until a fresh down event. Android's gesture
+  // recognizer already does a better job rejecting pan during pinch,
+  // so the lock isn't needed there.
   const [scrollEnabled, setScrollEnabled] = useState(true);
   useAnimatedReaction(
     () => isPinching.value,
     (current, previous) => {
+      if (IS_ANDROID) return;
       if (current !== previous && previous !== null) {
         runOnJS(setScrollEnabled)(!current);
       }
