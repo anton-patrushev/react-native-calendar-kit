@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import type {
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -11,6 +11,8 @@ import {
   ScrollView,
 } from 'react-native-gesture-handler';
 import Animated, {
+  runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
 } from 'react-native-reanimated';
@@ -160,6 +162,22 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     pinchStartOffsetY,
     pinchEndTarget,
   } = usePinchToZoom();
+
+  // Lock vertical ScrollView during pinch so finger movement that the
+  // OS routes to the pan-gesture (alongside the pinch) doesn't sneak in
+  // as native scroll. Without this, scrollOffsetLive can drift mid-
+  // pinch — which throws off the focal-anchor math and can leave a
+  // residual offset at gesture end. Bridging via React state is fine
+  // here: scrollEnabled only flips twice per pinch (begin/end).
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  useAnimatedReaction(
+    () => isPinching.value,
+    (current, previous) => {
+      if (current !== previous && previous !== null) {
+        runOnJS(setScrollEnabled)(!current);
+      }
+    }
+  );
 
   // Outer spacer: scales scroll content size with zoomScale
   const outerSpacerStyle = useAnimatedStyle(() => ({
@@ -500,6 +518,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
           ref={verticalListRef}
           scrollEventThrottle={16}
           pinchGestureEnabled={false}
+          scrollEnabled={scrollEnabled}
           showsVerticalScrollIndicator={false}
           onLayout={_onLayout}
           onScroll={_onScroll}
