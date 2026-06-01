@@ -1,7 +1,10 @@
 import React, { useMemo } from 'react';
 import type { GestureResponderEvent } from 'react-native';
 import { StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useDerivedValue,
+} from 'react-native-reanimated';
 import { EXTRA_HEIGHT, MILLISECONDS_IN_DAY } from '../../constants';
 import { useActions } from '../../context/ActionsProvider';
 import { useBody } from '../../context/BodyContext';
@@ -136,12 +139,21 @@ const TimelineBoard = ({
     height: timelineHeight.value - spaceFromTop - spaceFromBottom,
   }));
 
+  // Step zoomScale to 10% increments. With ~3-5 mounted BodyItems each
+  // running this wrapper style, Fabric Android can interleave parallel
+  // layout+transform commits per pinch frame and produce a one-frame
+  // mismatch with the inner-scale. Stepping cuts the commit cadence
+  // ~10x and keeps the lines visually correct (10% step transitions in
+  // line position during smooth pinch are invisible).
+  const zoomScaleStepped = useDerivedValue(
+    () => Math.round(zoomScale.value * 10) / 10
+  );
   // Single counter-scale wrapper (vs per-line animated styles) — keeps
   // ~96 lines at 1px and zoom-positioned with one useAnimatedStyle per
   // BodyItem. translateY simulates scaleY top-origin.
   const horizontalLinesWrapperStyle = useAnimatedStyle(() => {
     const totalH = timelineHeight.value - spaceFromTop - spaceFromBottom;
-    const z = zoomScale.value;
+    const z = zoomScaleStepped.value;
     return {
       height: totalH * z,
       transform: [
