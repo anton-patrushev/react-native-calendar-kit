@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { LayoutChangeEvent } from 'react-native';
+import type {
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+} from 'react-native';
 import { Platform, RefreshControl, StyleSheet, View } from 'react-native';
 import {
   Gesture,
@@ -351,26 +355,14 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     []
   );
 
-  // Drive offsetY from the Reanimated worklet-driven scroll offset via a
-  // UI-thread reaction, NOT from a JS-thread onScroll callback. Two
-  // sources writing to offsetY from different threads (JS `_onScroll`
-  // alongside the worklet-event registration from `useScrollViewOffset`
-  // backing `scrollOffsetLive`) was an Android Fabric race source — the
-  // bridge marshalled events twice and the two paths could converge to
-  // different values mid-pinch.
-  useAnimatedReaction(
-    () => scrollOffsetLive.value,
-    (current, previous) => {
-      'worklet';
-      if (current === previous) return;
-      // On Android, skip offsetY updates while pinching. The ScrollView
-      // may emit auto-adjusted offsets (from content-size changes or the
-      // simultaneous pan gesture) that would overwrite our focal-point
-      // computed offset. iOS doesn't have this issue.
-      if (IS_ANDROID && isPinching.value) return;
-      offsetY.value = current;
-    }
-  );
+  const _onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // On Android, skip offsetY updates while pinching. The ScrollView may
+    // fire onScroll with auto-adjusted offsets (from content size changes or
+    // the simultaneous pan gesture) that would overwrite our focal-point
+    // computed offset. iOS doesn't have this issue.
+    if (IS_ANDROID && isPinching.value) return;
+    offsetY.value = e.nativeEvent.contentOffset.y;
+  };
 
   const extraScrollData = useMemo(() => {
     return {
@@ -579,6 +571,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
           scrollEnabled={scrollEnabled}
           showsVerticalScrollIndicator={false}
           onLayout={_onLayout}
+          onScroll={_onScroll}
           refreshControl={
             onRefresh ? (
               <RefreshControl refreshing={false} onRefresh={_onRefresh} />
