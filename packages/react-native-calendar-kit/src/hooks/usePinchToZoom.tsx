@@ -26,7 +26,18 @@ const usePinchToZoom = () => {
     allowPinchToZoom,
     // Owned by CalendarContainer so the onZoomChange reaction can gate on it.
     isPinching,
+    scrollVisibleHeightAnim,
   } = useCalendar();
+
+  // Valid scroll range for a given zoom: [0, contentHeight - viewportHeight].
+  // The focal-anchor math can produce an out-of-range target (e.g. negative
+  // when zooming OUT near the top), which the ScrollView's real contentOffset
+  // can never rest at — leaving the gesture-end settle reaction armed forever
+  // and freezing subsequent scrolls. Clamping the target keeps it reachable.
+  const maxOffsetForZoom = (z: number) => {
+    'worklet';
+    return Math.max(0, timelineHeight.value * z - scrollVisibleHeightAnim.value);
+  };
 
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
   const startScale = useSharedValue(1);
@@ -94,6 +105,10 @@ const usePinchToZoom = () => {
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
       pinchScrollDelta.value = 0;
+      // Self-heal: clear any settle target left armed by a previous gesture
+      // (e.g. one that targeted an out-of-range offset). Without this, a stale
+      // armed target would keep auto-compensating and block scrolling.
+      pinchEndTarget.value = Number.NaN;
       isPinching.value = true;
     })
     .runOnJS(false)
@@ -130,9 +145,16 @@ const usePinchToZoom = () => {
         anchorContentY / (timelineHeight.value * startZoomScale.value);
 
       zoomScale.value = clampedZoomScale;
-      const newOffsetY =
+      // Clamp the focal-anchor target to the scrollable range. Out-of-range
+      // values (negative near the top on zoom-out, or beyond the bottom edge)
+      // are unreachable by the real contentOffset and break the iOS settle
+      // reaction. Clamping pins the edge instead of producing a phantom gap.
+      const newOffsetY = clampValues(
         anchorFrac * timelineHeight.value * clampedZoomScale -
-        startFocalY.value;
+          startFocalY.value,
+        0,
+        maxOffsetForZoom(clampedZoomScale)
+      );
 
       // Platform-split pinch-time scroll handling:
       //
@@ -182,7 +204,13 @@ const usePinchToZoom = () => {
       // innerScaleStyle's translateY includes a residual term that
       // auto-decreases as scrollOffsetLive catches up to pinchEndTarget.
       const liveOffsetY = startOffsetY.value - pinchScrollDelta.value;
-      const targetOffset = liveOffsetY;
+      // Already clamped via pinchScrollDelta (derived from a clamped target),
+      // but clamp again so the armed settle target is guaranteed reachable.
+      const targetOffset = clampValues(
+        liveOffsetY,
+        0,
+        maxOffsetForZoom(zoomScale.value)
+      );
 
       offsetY.value = targetOffset;
       scrollTo(verticalListRef, 0, targetOffset, false);
