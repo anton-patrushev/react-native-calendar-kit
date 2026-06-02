@@ -7,15 +7,13 @@ import {
   useAnimatedReaction,
   useScrollViewOffset,
   useSharedValue,
-  withSpring,
 } from 'react-native-reanimated';
 import { useCalendar } from '../context/CalendarProvider';
 import { clampValues } from '../utils/utils';
 import { Platform } from 'react-native';
 
 const SCALE_FACTOR = 0.5;
-const SPRING_DAMPING = 15;
-const SPRING_STIFFNESS = 100;
+const IS_ANDROID = Platform.OS === 'android';
 
 const usePinchToZoom = () => {
   const {
@@ -28,7 +26,6 @@ const usePinchToZoom = () => {
     allowPinchToZoom,
     // Owned by CalendarContainer so the onZoomChange reaction can gate on it.
     isPinching,
-    isSettling,
   } = useCalendar();
 
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
@@ -137,65 +134,62 @@ const usePinchToZoom = () => {
         anchorFrac * timelineHeight.value * clampedZoomScale -
         startFocalY.value;
 
-      // Apply the focal-anchor scroll movement as a translateY on the
-      // inner-scale wrapper instead of moving the real ScrollView. See
-      // the pinchScrollDelta declaration above for why. The transform
-      // direction is inverted: a positive scroll target (content moves
-      // up under the viewport) corresponds to a negative translateY.
-      pinchScrollDelta.value = startOffsetY.value - newOffsetY;
+      // Platform-split pinch-time scroll handling:
+      //
+      // ANDROID: per-frame `scrollTo` on the underlying ScrollView. The
+      // earlier translate-only iOS approach (which avoids Fabric commit
+      // ordering shake) does NOT translate well to Android — the
+      // ScrollView's gesture handler keeps emitting native scroll
+      // events alongside the pinch (we can't reliably lock scrollEnabled
+      // mid-touch on Android without wedging the dispatcher), so any
+      // residual offset has to be reconciled on release and the user
+      // sees a jump. Driving the real contentOffset every frame keeps
+      // the visual content position in lockstep with the focal-anchor
+      // math, and Android's ScrollView absorbs per-frame `scrollTo`
+      // smoothly without the iOS-side shake.
+      //
+      // iOS: translate-only via `pinchScrollDelta` folded into
+      // innerScaleStyle's translateY. Avoids the per-frame native scroll
+      // commit that races the inner-scale transform commit on Fabric.
+      // Combined with the iOS-only scrollEnabled lock (in CalendarBody),
+      // this keeps scrollOffsetLive stable through the pinch and the
+      // gesture-end transition lands cleanly via pinchEndTarget +
+      // auto-compensate reaction.
+      if (IS_ANDROID) {
+        offsetY.value = newOffsetY;
+        scrollTo(verticalListRef, 0, newOffsetY, false);
+      } else {
+        pinchScrollDelta.value = startOffsetY.value - newOffsetY;
+      }
       lastScale.value = newGestureScale;
     })
     .onEnd(() => {
-      // Spring back to clamped bounds if overscrolled
-      const finalZoomScale = clampValues(
-        zoomScale.value,
-        minZoomScale,
-        maxZoomScale
-      );
-      // Commit the accumulated pinch-time scroll translateY back into the
-      // real ScrollView contentOffset, then zero out the delta. From the
-      // user's POV nothing changes visually — translateY going from -X
-      // back to 0 happens in the same UI tick as scrollTo lands at X.
-      // (Reanimated batches both writes into a single commit.)
-      const liveOffsetY = startOffsetY.value - pinchScrollDelta.value;
-      let targetOffset = liveOffsetY;
-
-      if (finalZoomScale !== zoomScale.value) {
-        // Recompute target offset using the same anchor from gesture start
-        const anchorContentY = startFocalY.value + startOffsetY.value;
-        const anchorFrac =
-          anchorContentY / (timelineHeight.value * startZoomScale.value);
-        targetOffset =
-          anchorFrac * timelineHeight.value * finalZoomScale -
-          startFocalY.value;
-
-        // Flag the settle window so CalendarContainer defers
-        // onZoomChange until the spring completes — otherwise the
-        // intermediate percent ticks during the spring would land on the
-        // JS thread and shake consumers that do setState in their
-        // onZoomChange handler.
-        isSettling.value = true;
-        zoomScale.value = withSpring(
-          finalZoomScale,
-          {
-            damping: SPRING_DAMPING,
-            stiffness: SPRING_STIFFNESS,
-          },
-          () => {
-            'worklet';
-            isSettling.value = false;
-          }
-        );
+      // Android: nothing to reconcile. Per-frame `scrollTo` in onUpdate
+      // kept the ScrollView's contentOffset in lockstep with the
+      // focal-anchor target throughout the pinch. zoomScale is already
+      // within [min, max] (we clamp directly in onUpdate, no rubber-
+      // band overshoot), so there's no spring-back to handle either.
+      if (IS_ANDROID) {
+        lastScale.value = 1;
+        startScale.value = 1;
+        return;
       }
+
+      // iOS path — translate-only during pinch, reconcile here:
+      // Commit the accumulated pinch-time scroll translateY back into
+      // the real ScrollView contentOffset, then arm the auto-compensate
+      // reaction. From the user's POV nothing changes visually because
+      // innerScaleStyle's translateY includes a residual term that
+      // auto-decreases as scrollOffsetLive catches up to pinchEndTarget.
+      const liveOffsetY = startOffsetY.value - pinchScrollDelta.value;
+      const targetOffset = liveOffsetY;
 
       offsetY.value = targetOffset;
       scrollTo(verticalListRef, 0, targetOffset, false);
       // Arm the settle reaction. Once the native scroll lands at
       // `targetOffset` (typically next frame), the reaction will
       // re-baseline startOffsetY and zero pinchScrollDelta — atomically
-      // with the scroll arrival. Until then, innerScaleStyle's translateY
-      // auto-compensates via the live scroll position so visual stays
-      // constant through the transition.
+      // with the scroll arrival.
       pinchEndTarget.value = targetOffset;
 
       // Reset gesture scale trackers (NOT zoomScale — it persists)
