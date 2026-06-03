@@ -123,7 +123,7 @@ const NowIndicator: FC<{ showDot?: boolean }> = ({ showDot = true }) => {
 };
 
 export const NowIndicatorResource = () => {
-  const { showNowIndicator, hourWidth } = useBody();
+  const { showNowIndicator, hourWidth, columnWidth, columns } = useBody();
   const { currentDateUnix, currentTime } = useNowIndicator();
   const startUnix = useDateChangedListener();
 
@@ -132,11 +132,17 @@ export const NowIndicatorResource = () => {
   if (!isShowNowIndicator) {
     return null;
   }
+  // Match the body-level NowIndicator geometry: span the full row from x=0
+  // so the consumer chip lands over the TimeColumn (x=0..hourWidth) and the
+  // flex:1 line extends across the whole visible width. Previously this
+  // started at startLeft=hourWidth with a single columnWidth, so the chip+line
+  // only covered the body and never reached the time column.
   return (
     <NowIndicatorInner
       currentTime={currentTime}
       dayIndex={0}
-      startLeft={hourWidth}
+      startLeft={0}
+      width={hourWidth + columns * columnWidth}
     />
   );
 };
