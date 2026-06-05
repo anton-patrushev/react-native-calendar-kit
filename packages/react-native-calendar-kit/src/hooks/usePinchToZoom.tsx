@@ -4,8 +4,6 @@ import type { GestureType } from 'react-native-gesture-handler';
 import {
   cancelAnimation,
   scrollTo,
-  useAnimatedReaction,
-  useScrollViewOffset,
   useSharedValue,
 } from 'react-native-reanimated';
 import { useCalendar } from '../context/CalendarProvider';
@@ -29,11 +27,7 @@ const usePinchToZoom = () => {
     scrollVisibleHeightAnim,
   } = useCalendar();
 
-  // Valid scroll range for a given zoom: [0, contentHeight - viewportHeight].
-  // The focal-anchor math can produce an out-of-range target (e.g. negative
-  // when zooming OUT near the top), which the ScrollView's real contentOffset
-  // can never rest at — leaving the gesture-end settle reaction armed forever
-  // and freezing subsequent scrolls. Clamping the target keeps it reachable.
+  // Max reachable scroll for a given zoom: contentHeight - viewport (>= 0).
   const maxOffsetForZoom = (z: number) => {
     'worklet';
     return Math.max(0, timelineHeight.value * z - scrollVisibleHeightAnim.value);
@@ -43,57 +37,15 @@ const usePinchToZoom = () => {
   const startScale = useSharedValue(1);
   const lastScale = useSharedValue(1);
 
-  // Gesture-start snapshot — used for focal-point anchoring.
-  // We compute the anchor once at gesture start and derive the scroll
-  // offset purely from the zoom ratio change each frame.
+  // Gesture-start snapshots for focal anchoring.
   const startFocalY = useSharedValue(0);
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
 
-  // Pinch-time scroll compensation. During a pinch we DON'T call
-  // scrollTo every frame (that triggers a separate native scroll commit
-  // which races the inner-scale transform commit on Fabric and produces
-  // a visible shake of the scrollable surface). Instead we accumulate
-  // the focal-anchor delta here and let CalendarBody fold it into the
-  // inner-scale's translateY in the same animated style as the scaleY.
-  // Single commit per frame on the inner-scale node.
-  //
-  // At gesture end we DO NOT reset this to 0 instantly — that produces
-  // a one-frame visual jump because the SV write propagates to
-  // innerScaleStyle before the native scrollTo lands. Instead, the
-  // formula in innerScaleStyle reads from `scrollOffsetLive` (the
-  // ScrollView's live contentOffset) and a transition residual that
-  // auto-decreases as the scroll catches up. Once the scroll arrives at
-  // its target, the reaction below re-baselines `startOffsetY` and
-  // resets `pinchScrollDelta` — atomically in one worklet tick.
-  const pinchScrollDelta = useSharedValue(0);
-
-  // Live scroll position from the ScrollView. This SV updates as native
-  // scroll commits land. innerScaleStyle reads from it to compensate
-  // the pinch-end transition in sync with whichever frame the native
-  // scroll lands on.
-  const scrollOffsetLive = useScrollViewOffset(verticalListRef);
-
-  // Gesture-end transition state. When set, innerScaleStyle's translateY
-  // includes a residual term that auto-decreases as `scrollOffsetLive`
-  // approaches `pinchEndTarget`. When the scroll arrives, the reaction
-  // below re-baselines startOffsetY + clears the delta.
-  const pinchEndTarget = useSharedValue(Number.NaN);
-
-  useAnimatedReaction(
-    () => ({ s: scrollOffsetLive.value, t: pinchEndTarget.value }),
-    ({ s, t }) => {
-      'worklet';
-      if (!Number.isNaN(t) && Math.abs(s - t) < 0.5) {
-        // Scroll has arrived at the gesture-end target. Re-baseline so
-        // subsequent vertical scrolls don't keep auto-compensating, and
-        // clear the delta so translateY becomes zoom-only.
-        startOffsetY.value = s;
-        pinchScrollDelta.value = 0;
-        pinchEndTarget.value = Number.NaN;
-      }
-    }
-  );
+  // iOS-only viewport-center anchor translate (APP-5422). iOS freezes the scroll
+  // during the pinch and anchors via this transform (no scrollTo → no shake);
+  // stays 0 on Android, which scrolls for real. See onUpdate.
+  const pinchAnchorTranslate = useSharedValue(0);
 
   const pinchGesture = Gesture.Pinch()
     .onBegin(({ focalY }) => {
@@ -104,11 +56,7 @@ const usePinchToZoom = () => {
       startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
-      pinchScrollDelta.value = 0;
-      // Self-heal: clear any settle target left armed by a previous gesture
-      // (e.g. one that targeted an out-of-range offset). Without this, a stale
-      // armed target would keep auto-compensating and block scrolling.
-      pinchEndTarget.value = Number.NaN;
+      pinchAnchorTranslate.value = 0;
       isPinching.value = true;
     })
     .runOnJS(false)
@@ -117,110 +65,66 @@ const usePinchToZoom = () => {
         return;
       }
       const oldZoomScale = zoomScale.value;
-      // Calculate new zoomScale from gesture scale
       const newGestureScale = startScale.value * scale;
       const scaledDiff = (newGestureScale - lastScale.value) * SCALE_FACTOR;
       const newZoomScale = oldZoomScale * (1 + scaledDiff);
-
-      // Clamp directly to [min, max] — no rubber-band overshoot. Allowing
-      // overshoot here caused a visible "bounce" on Fabric: on release we
-      // had to spring `zoomScale` back to the clamp, but the focal-point
-      // anchored scroll was already set to its post-clamp target, so the
-      // content visibly jumped at release moment and sprang back as the
-      // value settled. Fabric commits content-size and scroll-offset
-      // updates in separate phases, exposing the mismatch.
+      // Clamp directly to [min, max] — no overshoot (overshoot bounced on Fabric).
       const clampedZoomScale = clampValues(
         newZoomScale,
         minZoomScale,
         maxZoomScale
       );
 
-      // Focal-point anchoring using gesture-start snapshot.
-      // anchorFrac = normalized position (0..1) of the focal point in content
-      // space at gesture start. We scale it by the new zoom to get the new
-      // content-space position, then subtract the original viewport focalY
-      // to get the scroll offset that keeps the anchor stationary on screen.
-      const anchorContentY = startFocalY.value + startOffsetY.value;
-      const anchorFrac =
-        anchorContentY / (timelineHeight.value * startZoomScale.value);
-
       zoomScale.value = clampedZoomScale;
-      // Clamp the focal-anchor target to the scrollable range. Out-of-range
-      // values (negative near the top on zoom-out, or beyond the bottom edge)
-      // are unreachable by the real contentOffset and break the iOS settle
-      // reaction. Clamping pins the edge instead of producing a phantom gap.
-      const newOffsetY = clampValues(
-        anchorFrac * timelineHeight.value * clampedZoomScale -
-          startFocalY.value,
-        0,
-        maxOffsetForZoom(clampedZoomScale)
-      );
 
-      // Platform-split pinch-time scroll handling:
-      //
-      // ANDROID: per-frame `scrollTo` on the underlying ScrollView. The
-      // earlier translate-only iOS approach (which avoids Fabric commit
-      // ordering shake) does NOT translate well to Android — the
-      // ScrollView's gesture handler keeps emitting native scroll
-      // events alongside the pinch (we can't reliably lock scrollEnabled
-      // mid-touch on Android without wedging the dispatcher), so any
-      // residual offset has to be reconciled on release and the user
-      // sees a jump. Driving the real contentOffset every frame keeps
-      // the visual content position in lockstep with the focal-anchor
-      // math, and Android's ScrollView absorbs per-frame `scrollTo`
-      // smoothly without the iOS-side shake.
-      //
-      // iOS: translate-only via `pinchScrollDelta` folded into
-      // innerScaleStyle's translateY. Avoids the per-frame native scroll
-      // commit that races the inner-scale transform commit on Fabric.
-      // Combined with the iOS-only scrollEnabled lock (in CalendarBody),
-      // this keeps scrollOffsetLive stable through the pinch and the
-      // gesture-end transition lands cleanly via pinchEndTarget +
-      // auto-compensate reaction.
       if (IS_ANDROID) {
+        // Android: real per-frame scrollTo, focal-point anchored. Android has no
+        // iOS-Fabric transform/scroll commit race, so the natural finger anchor
+        // is smooth and the scroll is already settled at release (no reconcile).
+        const anchorContentY = startFocalY.value + startOffsetY.value;
+        const anchorFrac =
+          anchorContentY / (timelineHeight.value * startZoomScale.value);
+        const newOffsetY = clampValues(
+          anchorFrac * timelineHeight.value * clampedZoomScale -
+            startFocalY.value,
+          0,
+          maxOffsetForZoom(clampedZoomScale)
+        );
         offsetY.value = newOffsetY;
         scrollTo(verticalListRef, 0, newOffsetY, false);
       } else {
-        pinchScrollDelta.value = startOffsetY.value - newOffsetY;
+        // iOS: frozen scroll, anchor via transform only (no scrollTo → no shake).
+        // δ keeps the viewport-center content fixed: it solves
+        // a*z + δ - startOffsetY = vh/2 for a = (startOffsetY + vh/2)/startZoom.
+        const vh = scrollVisibleHeightAnim.value;
+        const anchorDelta =
+          startZoomScale.value > 0
+            ? (startOffsetY.value + vh / 2) *
+              (1 - clampedZoomScale / startZoomScale.value)
+            : 0;
+        pinchAnchorTranslate.value = anchorDelta;
       }
       lastScale.value = newGestureScale;
     })
     .onEnd(() => {
-      // Android: nothing to reconcile. Per-frame `scrollTo` in onUpdate
-      // kept the ScrollView's contentOffset in lockstep with the
-      // focal-anchor target throughout the pinch. zoomScale is already
-      // within [min, max] (we clamp directly in onUpdate, no rubber-
-      // band overshoot), so there's no spring-back to handle either.
+      // Android scroll tracked live — already settled, nothing to reconcile.
       if (IS_ANDROID) {
         lastScale.value = 1;
         startScale.value = 1;
         return;
       }
-
-      // iOS path — translate-only during pinch, reconcile here:
-      // Commit the accumulated pinch-time scroll translateY back into
-      // the real ScrollView contentOffset, then arm the auto-compensate
-      // reaction. From the user's POV nothing changes visually because
-      // innerScaleStyle's translateY includes a residual term that
-      // auto-decreases as scrollOffsetLive catches up to pinchEndTarget.
-      const liveOffsetY = startOffsetY.value - pinchScrollDelta.value;
-      // Already clamped via pinchScrollDelta (derived from a clamped target),
-      // but clamp again so the armed settle target is guaranteed reachable.
-      const targetOffset = clampValues(
-        liveOffsetY,
+      // iOS: commit the frozen scroll to the anchored position (startOffsetY - δ,
+      // clamped to range) and clear δ.
+      const z = zoomScale.value;
+      const delta = pinchAnchorTranslate.value;
+      const targetScroll = clampValues(
+        startOffsetY.value - delta,
         0,
-        maxOffsetForZoom(zoomScale.value)
+        maxOffsetForZoom(z)
       );
-
-      offsetY.value = targetOffset;
-      scrollTo(verticalListRef, 0, targetOffset, false);
-      // Arm the settle reaction. Once the native scroll lands at
-      // `targetOffset` (typically next frame), the reaction will
-      // re-baseline startOffsetY and zero pinchScrollDelta — atomically
-      // with the scroll arrival.
-      pinchEndTarget.value = targetOffset;
-
-      // Reset gesture scale trackers (NOT zoomScale — it persists)
+      offsetY.value = targetScroll;
+      pinchAnchorTranslate.value = 0;
+      scrollTo(verticalListRef, 0, targetScroll, false);
       lastScale.value = 1;
       startScale.value = 1;
     })
@@ -297,10 +201,7 @@ const usePinchToZoom = () => {
     pinchGesture,
     pinchGestureRef,
     isPinching,
-    pinchScrollDelta,
-    scrollOffsetLive,
-    pinchStartOffsetY: startOffsetY,
-    pinchEndTarget,
+    pinchAnchorTranslate,
   };
 };
 

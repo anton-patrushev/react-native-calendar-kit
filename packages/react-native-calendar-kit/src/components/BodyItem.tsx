@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -34,7 +34,20 @@ const BodyItem = ({
     spaceFromBottom,
     calendarData,
     columns,
+    zoomScale,
+    commitTick,
   } = useBody();
+
+  // APP-5422: a page mounted fresh while zoomed can be left un-composited by
+  // Fabric (blank until a manual pinch). Bump commitTick to force the zoom
+  // transform to re-commit. Gated on zoom≠1 (no transform to miss at identity).
+  useEffect(() => {
+    if (Math.abs(zoomScale.value - 1) > 1e-3) {
+      commitTick.value += 1;
+    }
+    // mount-only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visibleDates = useMemo(() => {
     const data: Record<string, { diffDays: number; unix: number }> = {};

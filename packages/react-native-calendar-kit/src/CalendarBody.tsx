@@ -15,6 +15,7 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
+  useSharedValue,
 } from 'react-native-reanimated';
 import BodyItem from './components/BodyItem';
 import BodyResourceItem from './components/BodyResourceItem';
@@ -149,32 +150,11 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
-  // usePinchToZoom owns the pinch SharedValues read by innerScaleStyle
-  // below. It must be called BEFORE the animated styles that capture
-  // them — closures resolve `undefined` and crash with "Cannot read
-  // property 'value' of undefined" if the hook is below.
-  const {
-    pinchGesture,
-    pinchGestureRef,
-    isPinching,
-    pinchScrollDelta,
-    scrollOffsetLive,
-    pinchStartOffsetY,
-    pinchEndTarget,
-  } = usePinchToZoom();
+  const { pinchGesture, pinchGestureRef, isPinching, pinchAnchorTranslate } =
+    usePinchToZoom();
 
-  // Lock vertical ScrollView during pinch so finger movement that the
-  // OS routes to the pan-gesture (alongside the pinch) doesn't sneak in
-  // as native scroll. Without this, scrollOffsetLive can drift mid-
-  // pinch — which throws off the focal-anchor math and can leave a
-  // residual offset at gesture end. Bridging via React state is fine
-  // here: scrollEnabled only flips twice per pinch (begin/end).
-  //
-  // iOS only: on Android, toggling scrollEnabled false→true mid-touch
-  // leaves the native ScrollView in a state where subsequent vertical
-  // pans don't register until a fresh down event. Android's gesture
-  // recognizer already does a better job rejecting pan during pinch,
-  // so the lock isn't needed there.
+  // iOS-only: freeze the ScrollView during a pinch so finger pan can't fight the
+  // transform anchor. (No shake — iOS doesn't scrollTo during the pinch.)
   const [scrollEnabled, setScrollEnabled] = useState(true);
   useAnimatedReaction(
     () => isPinching.value,
@@ -186,42 +166,38 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     }
   );
 
-  // Outer spacer: scales scroll content size with zoomScale
-  const outerSpacerStyle = useAnimatedStyle(() => ({
-    height: timelineHeight.value * zoomScale.value,
-  }));
+  // APP-5422 fix A: bumped by a freshly-mounted BodyItem (while zoomed) so the
+  // zoom transform re-commits and Fabric composites the new page (else it stays
+  // blank until a manual pinch). Read below as a no-op `0 * commitTick` dep.
+  const commitTick = useSharedValue(0);
 
-  // Inner container's transform composes two pieces of vertical motion
-  // into a single commit per pinch frame:
-  //  1) `(timelineHeight/2)*(Z-1)` — simulates top-origin scaleY (so the
-  //     content scales from the top instead of the default center).
-  //     More reliable than transformOrigin across platforms (Android may
-  //     ignore transformOrigin when it's in a separate style object).
-  //  2) `pinchScrollDelta` plus a transition residual — the focal-anchor
-  //     scroll movement applied as translateY instead of a per-frame
-  //     scrollTo. During pinch, `scrollOffsetLive` equals
-  //     `pinchStartOffsetY` (no scroll moved) so the residual is 0 and
-  //     the translateY term is just `pinchScrollDelta`. At gesture end
-  //     `pinchEndTarget` is armed and we call scrollTo — as the native
-  //     scroll catches up to `startOffsetY - delta`, the residual
-  //     `(scrollOffsetLive - pinchStartOffsetY)` auto-decreases the
-  //     translateY contribution synchronously with the scroll commit,
-  //     so visual position stays constant through the transition.
-  //     The residual only applies while `pinchEndTarget` is armed
-  //     (i.e., during the settle window); after the settle reaction in
-  //     usePinchToZoom re-baselines pinchStartOffsetY + clears the
-  //     delta + clears pinchEndTarget, the residual collapses to 0 so
-  //     subsequent vertical scrolls don't keep auto-compensating.
+  // Outer spacer = scroll content size. iOS freezes the scroll during a pinch, so
+  // keep the content tall enough to hold the frozen position (no contentOffset
+  // clamp on zoom-out); Android scrolls for real, so its size tracks normally.
+  const outerSpacerStyle = useAnimatedStyle(() => {
+    const tick = commitTick.value;
+    const fullHeight = timelineHeight.value * zoomScale.value;
+    if (isPinching.value && !IS_ANDROID) {
+      return {
+        height:
+          Math.max(fullHeight, offsetY.value + scrollVisibleHeightAnim.value) +
+          0 * tick,
+      };
+    }
+    return { height: fullHeight + 0 * tick };
+  });
+
+  // Inner transform: top-origin scaleY via `(timelineHeight/2)*(Z-1)`, plus the
+  // iOS viewport-center anchor `pinchAnchorTranslate` (0 on Android). `commitTick`
+  // is the no-op fix-A re-commit dep (adds 0).
   const innerScaleStyle = useAnimatedStyle(() => ({
     height: timelineHeight.value,
     transform: [
       {
         translateY:
           (timelineHeight.value / 2) * (zoomScale.value - 1) +
-          pinchScrollDelta.value +
-          (Number.isNaN(pinchEndTarget.value)
-            ? 0
-            : scrollOffsetLive.value - pinchStartOffsetY.value),
+          pinchAnchorTranslate.value +
+          0 * commitTick.value,
       },
       { scaleY: zoomScale.value },
     ],
@@ -414,6 +390,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
         : undefined,
       zoomScale,
       counterScaleStyle,
+      commitTick,
     }),
     [
       renderHour,
@@ -464,6 +441,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       dayEndLineStyleProp,
       zoomScale,
       counterScaleStyle,
+      commitTick,
     ]
   );
 
