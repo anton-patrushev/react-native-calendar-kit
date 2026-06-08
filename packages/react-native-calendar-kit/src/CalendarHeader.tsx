@@ -25,7 +25,7 @@ import {
 import { useCalendar } from './context/CalendarProvider';
 import type { HeaderContextProps } from './context/DayBarContext';
 import { HeaderContext } from './context/DayBarContext';
-import { useEventCountsByWeek, useResources } from './context/EventsProvider';
+import { useEventCountsByWeek } from './context/EventsProvider';
 import { useTheme } from './context/ThemeProvider';
 import useSyncedList from './hooks/useSyncedList';
 import type { CalendarHeaderProps, ResourceItem } from './types';
@@ -73,6 +73,13 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     resourcePagingEnabled,
     linkedScrollGroup,
     dateResourceItems,
+    // Prop-synced resources (from CalendarProvider), NOT the EventsProvider
+    // store. The store's `resources` is written inside `notifyDataChanged` (an
+    // effect), so `useResources()` lags the `resources` prop by a commit. On a
+    // single -> multi transition that lag renders the resource header empty for
+    // a frame; reading the prop-synced value here keeps the header content in
+    // step with the layout that depends on it.
+    resources,
   } = useCalendar();
 
   const effectiveDayBarScrollEnabled =
@@ -83,7 +90,6 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     onScrollBeginDrag: linkedOnScrollBeginDrag,
     onMomentumScrollBegin: linkedOnMomentumScrollBegin,
   } = linkedScrollGroup.addAndGet(ScrollType.dayBar, dayBarListRef);
-  const resources = useResources();
 
   const headerStyles = useTheme(
     useCallback(

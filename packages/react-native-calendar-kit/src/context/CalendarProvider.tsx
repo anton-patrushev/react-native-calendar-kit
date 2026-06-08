@@ -8,6 +8,7 @@ import type { DataByMode } from '../utils/utils';
 import { CalendarListRef } from '../service/CalendarList';
 import { LinkedScrollGroup } from '../hooks/useLinkedScrollGroup';
 import { DateResourceItem } from '../components/Resource/ResourceListView';
+import type { ResourceItem } from '../types';
 
 export interface CalendarContextProps {
   calendarData: DataByMode;
@@ -65,6 +66,12 @@ export interface CalendarContextProps {
   resourcePagingEnabled: boolean;
   linkedScrollGroup: LinkedScrollGroup;
   dateResourceItems?: DateResourceItem[];
+  /**
+   * The resources prop, threaded through context so consumers (e.g. the
+   * header) read a value in step with the `resources` prop instead of the
+   * EventsProvider store, which is written in an effect and lags by a commit.
+   */
+  resources?: ResourceItem[];
   daySnapOffsets?: number[];
   handleResourceScrollOffsetChange?: (offset: number) => void;
   /** Current zoom scale. Writable — changes during pinch, persists after. */
