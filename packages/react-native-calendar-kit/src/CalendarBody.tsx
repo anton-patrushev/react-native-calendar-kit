@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import type {
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -11,8 +11,11 @@ import {
   ScrollView,
 } from 'react-native-gesture-handler';
 import Animated, {
+  runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
+  useSharedValue,
 } from 'react-native-reanimated';
 import BodyItem from './components/BodyItem';
 import BodyResourceItem from './components/BodyResourceItem';
@@ -20,11 +23,12 @@ import CalendarListView from './components/CalendarListView';
 import DragEventPlaceholder from './components/DraggingEvent';
 import DraggingHour from './components/DraggingHour';
 import TappedSlotIndicator from './components/TappedSlotIndicator';
-import { NowIndicatorResource } from './components/NowIndicator';
+import NowIndicator, { NowIndicatorResource } from './components/NowIndicator';
 import ResourceListView from './components/Resource/ResourceListView';
 import ResourceOverlay from './components/Resource/ResourceOverlay';
 import TimeColumn from './components/TimeColumn';
-import { EXTRA_HEIGHT, ScrollType } from './constants';
+import { EXTRA_HEIGHT, HOUR_SHORT_LINE_WIDTH, ScrollType } from './constants';
+import { useTheme } from './context/ThemeProvider';
 import { useActions } from './context/ActionsProvider';
 import type { BodyContextProps } from './context/BodyContext';
 import { BodyContext } from './context/BodyContext';
@@ -146,29 +150,89 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     [linkedOnMomentumScrollBegin, scrollProps]
   );
 
-  // Outer spacer: scales scroll content size with zoomScale
-  const outerSpacerStyle = useAnimatedStyle(() => ({
-    height: timelineHeight.value * zoomScale.value,
-  }));
+  const { pinchGesture, pinchGestureRef, isPinching, pinchAnchorTranslate } =
+    usePinchToZoom();
 
-  // Inner container: GPU-accelerated scaleY transform.
-  // The translateY simulates transformOrigin: '0% 0%' (top-left) by
-  // compensating for the default center-origin scaling. This is more
-  // reliable than transformOrigin across platforms (Android may ignore
-  // transformOrigin when it's in a separate style object from transform).
+  // iOS-only: freeze the ScrollView during a pinch so finger pan can't fight the
+  // transform anchor. (No shake — iOS doesn't scrollTo during the pinch.)
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  useAnimatedReaction(
+    () => isPinching.value,
+    (current, previous) => {
+      if (IS_ANDROID) return;
+      if (current !== previous && previous !== null) {
+        runOnJS(setScrollEnabled)(!current);
+      }
+    }
+  );
+
+  // APP-5422 fix A: bumped by a freshly-mounted BodyItem (while zoomed) so the
+  // zoom transform re-commits and Fabric composites the new page (else it stays
+  // blank until a manual pinch). Read below as a no-op `0 * commitTick` dep.
+  const commitTick = useSharedValue(0);
+
+  // Outer spacer = scroll content size. iOS freezes the scroll during a pinch, so
+  // keep the content tall enough to hold the frozen position (no contentOffset
+  // clamp on zoom-out); Android scrolls for real, so its size tracks normally.
+  const outerSpacerStyle = useAnimatedStyle(() => {
+    const tick = commitTick.value;
+    const fullHeight = timelineHeight.value * zoomScale.value;
+    if (isPinching.value && !IS_ANDROID) {
+      return {
+        height:
+          Math.max(fullHeight, offsetY.value + scrollVisibleHeightAnim.value) +
+          0 * tick,
+      };
+    }
+    return { height: fullHeight + 0 * tick };
+  });
+
+  // Inner transform: top-origin scaleY via `(timelineHeight/2)*(Z-1)`, plus the
+  // iOS viewport-center anchor `pinchAnchorTranslate` (0 on Android). `commitTick`
+  // is the no-op fix-A re-commit dep (adds 0).
   const innerScaleStyle = useAnimatedStyle(() => ({
+    height: timelineHeight.value,
     transform: [
-      { translateY: (timelineHeight.value / 2) * (zoomScale.value - 1) },
+      {
+        translateY:
+          (timelineHeight.value / 2) * (zoomScale.value - 1) +
+          pinchAnchorTranslate.value +
+          0 * commitTick.value,
+      },
       { scaleY: zoomScale.value },
     ],
   }));
 
-  // Counter-scale style shared across all children via BodyContext
+  // Stepped counter-scale source. `counterScaleStyle` is consumed by 100+
+  // nodes during a pinch — every hour/half/quarter label in TimeColumn,
+  // every event title, NowIndicator, drag overlays. If the style reads
+  // `zoomScale.value` directly, EVERY consumer's transform commits on
+  // every pinch frame (~60 Hz × ~100 nodes = thousands of native
+  // commits/sec on UI thread).
+  //
+  // Route through a stepped useDerivedValue so the value only changes at
+  // ~0.1 zoom increments. Consumers' useAnimatedStyle worklets are
+  // dep-tracked on this SV — they re-fire ONLY when the stepped value
+  // changes, not every frame. Counter-scale "steps" through the zoom
+  // range in 10% increments (visually imperceptible during pinch).
+  const counterScaleSteppedSV = useDerivedValue(() => {
+    return Math.round(zoomScale.value * 10) / 10;
+  });
   const counterScaleStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleY: 1 / zoomScale.value }],
+    transform: [{ scaleY: 1 / counterScaleSteppedSV.value }],
   }));
 
-  const { pinchGesture, pinchGestureRef, isPinching } = usePinchToZoom();
+  // Hour-tick overlay positioning — outside scaled subtree so 1px ticks
+  // stay 1px; one animated style drives all tick positions.
+  const horizontalLinesWrapperStyle = useAnimatedStyle(() => ({
+    top: spaceFromTop * zoomScale.value,
+    height:
+      (timelineHeight.value - spaceFromTop - spaceFromBottom) * zoomScale.value,
+  }));
+
+  const cellBorderColor = useTheme(
+    (state) => state.hourBorderColor ?? state.colors.border
+  );
   const dragEventGesture = useDragEventGesture();
   const dragToCreateGesture = useDragToCreateGesture({
     mode: dragToCreateMode,
@@ -250,10 +314,22 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   }, [hourFormat, locale.meridiem, slots]);
 
   const _renderResourceItem = useCallback(
-    (item: { items: ResourceItem[]; index: number; isDayEnd?: boolean; isDayStart?: boolean }) => {
+    (item: {
+      items: ResourceItem[];
+      index: number;
+      isDayEnd?: boolean;
+      isDayStart?: boolean;
+    }) => {
       // In dual-axis mode, get the date for this specific item
       const dateUnix = dateResourceItems?.[item.index]?.date;
-      return <BodyResourceItem resources={item.items} dateUnix={dateUnix} isDayEnd={item.isDayEnd} isDayStart={item.isDayStart} />;
+      return (
+        <BodyResourceItem
+          resources={item.items}
+          dateUnix={dateUnix}
+          isDayEnd={item.isDayEnd}
+          isDayStart={item.isDayStart}
+        />
+      );
     },
     [dateResourceItems]
   );
@@ -314,6 +390,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
         : undefined,
       zoomScale,
       counterScaleStyle,
+      commitTick,
     }),
     [
       renderHour,
@@ -364,6 +441,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
       dayEndLineStyleProp,
       zoomScale,
       counterScaleStyle,
+      commitTick,
     ]
   );
 
@@ -376,7 +454,35 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
         )
       : Gesture.Race(pinchGesture, dragEventGesture, dragToCreateGesture);
 
-  const leftSize = numberOfDays > 1 || !!resources ? hourWidth : 0;
+  // TimeColumn always renders at body level (was conditional on multi-day or
+  // resources before — in single-day mode it lived inside each cell and slid
+  // horizontally on day-swipe, desyncing visually from the body-level lines
+  // overlay).
+  const leftSize = hourWidth;
+
+  // Hour-tick markers at the TimeColumn/grid boundary. Negative `left`
+  // peeks back into the TimeColumn area. Gated on showTimeColumnRightLine.
+  const hourTicks = useMemo(() => {
+    if (!showTimeColumnRightLine) return null;
+    const ticks: React.ReactNode[] = [];
+    for (let i = 0; i <= totalSlots; i++) {
+      ticks.push(
+        <View
+          key={`tick-${i}`}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: -HOUR_SHORT_LINE_WIDTH,
+            width: HOUR_SHORT_LINE_WIDTH,
+            height: 1,
+            top: `${(i / totalSlots) * 100}%`,
+            backgroundColor: cellBorderColor,
+          }}
+        />
+      );
+    }
+    return ticks;
+  }, [totalSlots, cellBorderColor, showTimeColumnRightLine]);
 
   const _renderResourceOverlay = useCallback(
     (props: { totalSize: number; resources: ResourceItem[] }) => {
@@ -397,6 +503,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
           ref={verticalListRef}
           scrollEventThrottle={16}
           pinchGestureEnabled={false}
+          scrollEnabled={scrollEnabled}
           showsVerticalScrollIndicator={false}
           onLayout={_onLayout}
           onScroll={_onScroll}
@@ -419,93 +526,111 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                 },
                 outerSpacerStyle,
               ]}>
-              {/* Inner scale container: GPU-accelerated scaleY transform */}
-              <Animated.View
-                style={[
-                  {
-                    width: calendarLayout.width,
-                    height: timelineHeight.value,
-                  },
-                  innerScaleStyle,
-                ]}>
-              <View
-                style={[
-                  styles.absolute,
-                  { top: -EXTRA_HEIGHT, width: calendarLayout.width },
-                ]}>
-                {(numberOfDays > 1 || !!resources) && <TimeColumn />}
-                <View
+              {/* Hour-tick overlay (body-level, outside scaled subtree).
+                  Grid lines themselves moved into TimelineBoard to paint
+                  over UnavailableHours. */}
+              {hourTicks && (
+                <Animated.View
+                  pointerEvents="none"
                   style={[
                     styles.absolute,
                     {
-                      left: Math.max(0, leftSize - 1),
-                      width: calendarLayout.width - leftSize,
+                      left: hourWidth,
+                      width: calendarLayout.width - hourWidth,
                     },
+                    horizontalLinesWrapperStyle,
                   ]}>
-                  {enableResourceScroll ? (
-                    <ResourceListView
-                      ref={gridListRef}
-                      resources={resources}
-                      items={dateResourceItems}
-                      width={calendarGridWidth}
-                      height={maxTimelineHeight + EXTRA_HEIGHT * 2}
-                      resourcePerPage={resourcePerPage}
-                      renderItem={_renderResourceItem}
-                      pagingEnabled={resourcePagingEnabled}
-                      renderOverlay={_renderResourceOverlay}
-                      scrollEnabled={allowHorizontalSwipe}
-                      onScrollBeginDrag={onScrollBeginDrag}
-                      onMomentumScrollBegin={onMomentumScrollBegin}
-                      onTouchStart={onTouchStart}
-                      onWheel={onWheel}
-                      snapToOffsets={daySnapOffsets}
-                      onScrollOffsetChange={handleResourceScrollOffsetChange}
-                      initialOffset={initialOffset}
-                    />
-                  ) : (
-                    <CalendarListView
-                      ref={calendarListRef}
-                      animatedRef={gridListRef}
-                      count={calendarData.count}
-                      scrollEnabled={allowHorizontalSwipe}
-                      width={calendarGridWidth}
-                      height={maxTimelineHeight + EXTRA_HEIGHT * 2}
-                      renderItem={_renderTimeSlots}
-                      extraData={extraData}
-                      inverted={isRTL}
-                      snapToInterval={snapToInterval}
-                      initialOffset={initialOffset}
-                      columnsPerPage={columns}
-                      renderAheadItem={pagesPerSide}
-                      extraScrollData={extraScrollData}
-                      {...scrollProps}
-                      onScrollBeginDrag={onScrollBeginDrag}
-                      onMomentumScrollBegin={onMomentumScrollBegin}
-                      onLoad={onLoad}
-                      onTouchStart={onTouchStart}
-                      onWheel={onWheel}
-                    />
-                  )}
-                </View>
+                  {hourTicks}
+                </Animated.View>
+              )}
+              {/* Inner scale container: GPU-accelerated scaleY transform */}
+              <Animated.View
+                style={[{ width: calendarLayout.width }, innerScaleStyle]}>
                 <View
-                  pointerEvents="box-none"
                   style={[
                     styles.absolute,
-                    { top: EXTRA_HEIGHT + spaceFromTop },
-                    styles.dragContainer,
+                    { top: -EXTRA_HEIGHT, width: calendarLayout.width },
                   ]}>
-                  {enableResourceScroll && <NowIndicatorResource />}
-                  <DragEventPlaceholder
-                    renderDraggingEvent={renderDraggingEvent}
-                    resources={resources}
-                  />
-                  <DraggingHour renderHour={renderDraggingHour} showEndTime={showDraggingEndTime} />
-                  <TappedSlotIndicator
-                    resources={resources}
-                    borderColor={tapFeedbackBorderColor}
-                  />
+                  <TimeColumn />
+                  <View
+                    style={[
+                      styles.absolute,
+                      {
+                        left: Math.max(0, leftSize - 1),
+                        width: calendarLayout.width - leftSize,
+                      },
+                    ]}>
+                    {enableResourceScroll ? (
+                      <ResourceListView
+                        ref={gridListRef}
+                        resources={resources}
+                        items={dateResourceItems}
+                        width={calendarGridWidth}
+                        height={maxTimelineHeight + EXTRA_HEIGHT * 2}
+                        resourcePerPage={resourcePerPage}
+                        renderItem={_renderResourceItem}
+                        pagingEnabled={resourcePagingEnabled}
+                        renderOverlay={_renderResourceOverlay}
+                        scrollEnabled={allowHorizontalSwipe}
+                        onScrollBeginDrag={onScrollBeginDrag}
+                        onMomentumScrollBegin={onMomentumScrollBegin}
+                        onTouchStart={onTouchStart}
+                        onWheel={onWheel}
+                        snapToOffsets={daySnapOffsets}
+                        onScrollOffsetChange={handleResourceScrollOffsetChange}
+                        initialOffset={initialOffset}
+                      />
+                    ) : (
+                      <CalendarListView
+                        ref={calendarListRef}
+                        animatedRef={gridListRef}
+                        count={calendarData.count}
+                        scrollEnabled={allowHorizontalSwipe}
+                        width={calendarGridWidth}
+                        height={maxTimelineHeight + EXTRA_HEIGHT * 2}
+                        renderItem={_renderTimeSlots}
+                        extraData={extraData}
+                        inverted={isRTL}
+                        snapToInterval={snapToInterval}
+                        initialOffset={initialOffset}
+                        columnsPerPage={columns}
+                        renderAheadItem={pagesPerSide}
+                        extraScrollData={extraScrollData}
+                        {...scrollProps}
+                        onScrollBeginDrag={onScrollBeginDrag}
+                        onMomentumScrollBegin={onMomentumScrollBegin}
+                        onLoad={onLoad}
+                        onTouchStart={onTouchStart}
+                        onWheel={onWheel}
+                      />
+                    )}
+                  </View>
+                  <View
+                    pointerEvents="box-none"
+                    style={[
+                      styles.absolute,
+                      { top: EXTRA_HEIGHT + spaceFromTop },
+                      styles.dragContainer,
+                    ]}>
+                    {enableResourceScroll ? (
+                      <NowIndicatorResource />
+                    ) : (
+                      <NowIndicator />
+                    )}
+                    <DragEventPlaceholder
+                      renderDraggingEvent={renderDraggingEvent}
+                      resources={resources}
+                    />
+                    <DraggingHour
+                      renderHour={renderDraggingHour}
+                      showEndTime={showDraggingEndTime}
+                    />
+                    <TappedSlotIndicator
+                      resources={resources}
+                      borderColor={tapFeedbackBorderColor}
+                    />
+                  </View>
                 </View>
-              </View>
               </Animated.View>
             </Animated.View>
 

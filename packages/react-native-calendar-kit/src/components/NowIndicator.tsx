@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { SharedValue } from 'react-native-reanimated';
 import Animated, {
@@ -61,7 +61,14 @@ const NowIndicatorInner = ({
         },
         animView,
       ]}>
-      <Animated.View style={counterScaleStyle}>
+      {/*
+        Counter-scale wrapper applies to BOTH the default line+dot AND any
+        consumer-provided NowIndicatorComponent so it doesn't stretch
+        vertically at non-1 zoom. transformOrigin: 'top' anchors the
+        indicator at the current-time row; without it, default center-origin
+        would pull the line off-row at zoom > 1.
+      */}
+      <Animated.View style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
         {NowIndicatorComponent || (
           <View style={styles.lineContainer}>
             <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
@@ -77,31 +84,46 @@ const NowIndicatorInner = ({
   );
 };
 
-const NowIndicator: FC<{
-  visibleDates: Record<string, { diffDays: number; unix: number }>;
-  showDot?: boolean;
-}> = ({ visibleDates, showDot = true }) => {
-  const { showNowIndicator } = useBody();
+// Body-level indicator: renders as a sibling of the horizontal CalendarList
+// but inside the vertical body scroll. It scrolls vertically with the
+// timeline and stays static during horizontal page swipes (chip won't ride
+// off across days). Hidden when the active page does not contain today.
+const NowIndicator: FC<{ showDot?: boolean }> = ({ showDot = true }) => {
+  const { showNowIndicator, hourWidth, columnWidth, columns } = useBody();
   const { currentDateUnix, currentTime } = useNowIndicator();
+  const activeDayUnix = useDateChangedListener();
 
-  const visibleDate = visibleDates[currentDateUnix];
-  const isShowNowIndicator = showNowIndicator && visibleDate;
+  // Today's column index relative to the active page's left-most day.
+  // Negative or >= columns means today is outside the visible page.
+  const dayIndex = useMemo(() => {
+    const dayMs = 86400000;
+    return Math.round((currentDateUnix - activeDayUnix) / dayMs);
+  }, [currentDateUnix, activeDayUnix]);
 
-  if (!isShowNowIndicator) {
+  const inRange = dayIndex >= 0 && dayIndex < columns;
+
+  if (!showNowIndicator || !inRange) {
     return null;
   }
 
+  // Container spans the full body width: chip lands over the TimeColumn
+  // area (x=0..hourWidth) and the consumer's flex:1 line extends across
+  // the entire visible row. Splitting chip vs line into separate slots so
+  // the line only covers today's column would require the consumer to
+  // render them as two components — we keep the single-component contract.
   return (
     <NowIndicatorInner
       currentTime={currentTime}
-      dayIndex={visibleDate.diffDays}
+      dayIndex={0}
+      startLeft={0}
+      width={hourWidth + columns * columnWidth}
       showDot={showDot}
     />
   );
 };
 
 export const NowIndicatorResource = () => {
-  const { showNowIndicator, hourWidth } = useBody();
+  const { showNowIndicator, hourWidth, columnWidth, columns } = useBody();
   const { currentDateUnix, currentTime } = useNowIndicator();
   const startUnix = useDateChangedListener();
 
@@ -110,11 +132,17 @@ export const NowIndicatorResource = () => {
   if (!isShowNowIndicator) {
     return null;
   }
+  // Match the body-level NowIndicator geometry: span the full row from x=0
+  // so the consumer chip lands over the TimeColumn (x=0..hourWidth) and the
+  // flex:1 line extends across the whole visible width. Previously this
+  // started at startLeft=hourWidth with a single columnWidth, so the chip+line
+  // only covered the body and never reached the time column.
   return (
     <NowIndicatorInner
       currentTime={currentTime}
       dayIndex={0}
-      startLeft={hourWidth}
+      startLeft={0}
+      width={hourWidth + columns * columnWidth}
     />
   );
 };
@@ -122,7 +150,10 @@ export const NowIndicatorResource = () => {
 export default React.memo(NowIndicator);
 
 const styles = StyleSheet.create({
-  container: { position: 'absolute', zIndex: 1 },
+  // zIndex above TimeColumn (998) so the indicator paints over the hour
+  // labels — consumers commonly want the line/dot to draw across the
+  // time-label column rather than be obscured by it.
+  container: { position: 'absolute', zIndex: 999 },
   line: {
     position: 'absolute',
     height: 2,

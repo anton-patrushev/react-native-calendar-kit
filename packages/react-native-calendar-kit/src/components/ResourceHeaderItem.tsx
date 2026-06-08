@@ -97,7 +97,14 @@ const ResourceHeaderItem: FC<ResourceHeaderItemProps> = ({
   );
 };
 
-export default ResourceHeaderItem;
+// React.memo avoids re-rendering the full resources.map() tree on every
+// scroll-driven invocation of renderHeaderItem. Consumers wrap N expensive
+// resource cards inside this component; without memo, the header's
+// CalendarList re-renders the parent on each visibleRange/column boundary
+// and the .map allocates new JSX per render. Memo with shallow-equal
+// props is enough because library-side callers pass stable values
+// (startUnix, resources reference, renderResource) per column.
+export default React.memo(ResourceHeaderItem);
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

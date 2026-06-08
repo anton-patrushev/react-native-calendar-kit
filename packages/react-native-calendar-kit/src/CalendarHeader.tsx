@@ -311,7 +311,13 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     };
   }, [calendarData.visibleDatesArray, numberOfDays]);
 
-  const leftSize = numberOfDays > 1 || !!resources ? hourWidth : 0;
+  // Match CalendarBody — TimeColumn always renders at body level, so the
+  // header's left area always reserves `hourWidth` and the day list to its
+  // right is `calendarGridWidth` (= calendarLayout.width - hourWidth) wide
+  // in every mode. Previously this was 0 in single-day mode, which made the
+  // day-list viewport `calendarLayout.width` wide while each item was only
+  // `calendarGridWidth` wide — two header days were visible at once.
+  const leftSize = hourWidth;
 
   const _renderLeftArea = () => {
     if (LeftAreaComponent) {
@@ -398,7 +404,10 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
         <HeaderContext.Provider value={value}>
           <Animated.View
             style={[{ width: calendarLayout.width }, headerContentStyle]}>
-            {(numberOfDays > 1 || !!resources) && _renderLeftArea()}
+            {/* Left area (week-number / expand button placeholder) always
+                renders so the header's day list starts at x=hourWidth in
+                every mode — matches the body-level TimeColumn position. */}
+            {_renderLeftArea()}
             <Animated.View
               style={[
                 styles.absolute,

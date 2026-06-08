@@ -74,6 +74,9 @@ export interface BodyContextProps {
   zoomScale: SharedValue<number>;
   /** Shared counter-scale animated style: { transform: [{ scaleY: 1/zoomScale }] } */
   counterScaleStyle: { transform: { scaleY: number }[] };
+  /** APP-5422 re-commit trigger: a fresh BodyItem bumps it (while zoomed) to
+   * force the zoom transform to re-commit so Fabric composites the new page. */
+  commitTick: SharedValue<number>;
 }
 
 export const BodyContext = React.createContext<BodyContextProps | undefined>(

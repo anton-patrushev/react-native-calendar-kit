@@ -153,10 +153,10 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
       return null;
     }
 
-    if (TopEdgeComponent) {
-      return TopEdgeComponent;
-    }
-
+    // Default (center) transformOrigin so counter-scale shrinks the dot
+    // around its own center. The dot is already positioned by layout
+    // (top: -12) so its visual center sits exactly on the event's top
+    // edge — center-origin scale keeps it there at any zoom.
     return (
       <Animated.View
         style={[
@@ -165,7 +165,7 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
           numberOfDays === 1 && styles.dotLeftSingle,
           counterScaleStyle,
         ]}>
-        <DragDot />
+        {TopEdgeComponent || <DragDot />}
       </Animated.View>
     );
   };
@@ -173,10 +173,6 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
   const renderBottomEdgeComponent = () => {
     if (!isShowDot) {
       return null;
-    }
-
-    if (BottomEdgeComponent) {
-      return BottomEdgeComponent;
     }
 
     return (
@@ -187,23 +183,74 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
           numberOfDays === 1 && styles.dotRightSingle,
           counterScaleStyle,
         ]}>
-        <DragDot />
+        {BottomEdgeComponent || <DragDot />}
       </Animated.View>
     );
   };
 
+  // Base border width / radius — sourced from consumer's containerStyle
+  // first, then theme.eventContainerStyle, then library defaults. Always
+  // zoom-compensate so the consumer's static value doesn't visibly stretch
+  // at high zoom.
+  const consumerBorderWidth =
+    typeof (containerStyle as { borderWidth?: number } | undefined)
+      ?.borderWidth === 'number'
+      ? (containerStyle as { borderWidth: number }).borderWidth
+      : undefined;
+  const consumerBorderRadius =
+    typeof (containerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (containerStyle as { borderRadius: number }).borderRadius
+      : undefined;
+  const themeBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
+      : undefined;
+  const baseDraggingWidth = consumerBorderWidth ?? 3;
+  const baseDraggingRadius =
+    consumerBorderRadius ?? themeBorderRadius ?? 4;
+
+  // Left/right border width is static (X axis not scaled by zoom) —
+  // mirrors baseDraggingWidth so all four sides match at any zoom.
+  const sideBordersStyle = {
+    borderLeftWidth: baseDraggingWidth,
+    borderRightWidth: baseDraggingWidth,
+  };
+  // Top/bottom widths + borderRadius animate with zoom so their visual
+  // values stay constant. Drag is mutually exclusive with pinch, so
+  // zoomScale is constant during drag — this animated layout prop fires
+  // at most once per drag mount.
+  const outlineBorderStyle = useAnimatedStyle(() => ({
+    borderTopWidth: baseDraggingWidth / zoomScale.value,
+    borderBottomWidth: baseDraggingWidth / zoomScale.value,
+    // RN has no asymmetric X/Y radii, so horizontal radius flattens at
+    // high zoom — accepted trade-off vs the alternative of unbounded
+    // vertical curve eating into content.
+    borderRadius: baseDraggingRadius / zoomScale.value,
+  }));
+
   return (
     <Animated.View style={[styles.container, { width: eventWidth }, animView]}>
-      <View
+      <Animated.View
         style={[
           StyleSheet.absoluteFill,
           theme.eventContainerStyle,
-          styles.event,
+          // Backgrounds + library default borderColor — consumer's
+          // containerStyle.borderColor (if any) overrides via the array
+          // order below.
           {
             backgroundColor: draggingEvent?.color ?? 'transparent',
             borderColor: theme.primaryColor,
+            overflow: 'hidden',
           },
           containerStyle,
+          // Apply our computed border widths/radius LAST so they always
+          // win over consumer's static shorthand `borderWidth` — RN's
+          // per-side border merging makes side-specific properties
+          // override the shorthand, which is exactly what we want here.
+          sideBordersStyle,
+          outlineBorderStyle,
         ]}>
         {renderEvent ? (
           renderEvent(draggingEvent, {
@@ -211,7 +258,8 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
             height: eventHeight,
           })
         ) : (
-          <Animated.View style={counterScaleStyle}>
+          <Animated.View
+            style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
             {!!draggingEvent?.title && (
               <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
                 {draggingEvent.title}
@@ -219,7 +267,7 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
             )}
           </Animated.View>
         )}
-      </View>
+      </Animated.View>
       {isShowDot && renderTopEdgeComponent()}
       {isShowDot && renderBottomEdgeComponent()}
     </Animated.View>
@@ -296,8 +344,9 @@ const styles = StyleSheet.create({
     height: 24,
   },
   event: {
-    borderWidth: 3,
-    borderRadius: 4,
+    borderLeftWidth: 3,
+    borderRightWidth: 3,
+    // borderRadius supplied by outlineBorderStyle (animated by zoom).
     overflow: 'hidden',
   },
   dotLeft: { top: -12, left: -12 },

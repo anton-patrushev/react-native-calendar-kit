@@ -455,31 +455,33 @@ const Calendar = () => {
     });
   }, []);
 
-  const unavailableHours = useMemo(
-    () => [
-      { start: 0, end: 6 * 60, enableBackgroundInteraction: true },
-      { start: 20 * 60, end: 24 * 60, enableBackgroundInteraction: true },
-      {
-        start: 7 * 60,
-        end: 8 * 60,
-        enableBackgroundInteraction: true,
-        resourceId: resources[0].id,
-      },
-      {
-        start: 8 * 60,
-        end: 9 * 60,
-        enableBackgroundInteraction: true,
-        resourceId: resources[1].id,
-      },
-      {
-        start: 9 * 60,
-        end: 10 * 60,
-        enableBackgroundInteraction: true,
-        resourceId: resources[2].id,
-      },
-    ],
-    []
-  );
+  // Per-weekday unavailable hours (1=Mon..7=Sun). Stable record — no
+  // re-derivation on date change. Different schedule per weekday so the
+  // calendar visibly varies day-to-day; useful for catching "data flash"
+  // bugs during horizontal swipes.
+  const unavailableHours = useMemo<
+    Record<string, UnavailableHourProps[]>
+  >(() => {
+    // Each weekday's morning-closed and evening-closed bands shift slightly
+    // so adjacent days look different.
+    const dayDef = (weekday: number): UnavailableHourProps[] => {
+      const morningEnd = (6 + (weekday % 3)) * 60; // 6, 7, or 8 AM
+      const eveningStart = (19 + (weekday % 4)) * 60; // 19..22
+      return [
+        { start: 0, end: morningEnd, enableBackgroundInteraction: true },
+        { start: eveningStart, end: 24 * 60, enableBackgroundInteraction: true },
+      ];
+    };
+    return {
+      '1': dayDef(1),
+      '2': dayDef(2),
+      '3': dayDef(3),
+      '4': dayDef(4),
+      '5': dayDef(5),
+      '6': dayDef(6),
+      '7': dayDef(7),
+    };
+  }, []);
   const highlightDates = useMemo(
     () => ({
       '6': { dayNumber: { color: 'blue' }, dayName: { color: 'blue' } },
@@ -638,6 +640,8 @@ const Calendar = () => {
         }
         showWeekNumber={configs.showWeekNumber}
         allowPinchToZoom
+        minTimeIntervalHeight={20}
+        maxTimeIntervalHeight={240}
         onChange={_onChange}
         onDateChanged={console.log}
         minDate={MIN_DATE}

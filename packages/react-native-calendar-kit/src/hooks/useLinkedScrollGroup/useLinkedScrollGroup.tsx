@@ -40,17 +40,32 @@ export const useLinkedScrollGroup = (
   const peers = useSharedValue<AnimatedRef<Animated.ScrollView>[]>([]);
   const peersRef = useRef<AnimatedRef<Animated.ScrollView>[]>([]);
 
+  // Track the last offset we issued scrollTo() for. On Fabric every
+  // scrollTo on a peer is a separate native scroll commit; calling it
+  // every scroll frame even when the offset hasn't drifted from the
+  // previous tick produces redundant native commits on the peer
+  // ScrollView and drops UI FPS on heavy peer subtrees (e.g. the
+  // calendar header with custom resource cards). The 1-pixel threshold
+  // collapses noise while keeping the peer pixel-aligned at rest.
+  const lastSyncedX = useSharedValue(0);
+  const lastSyncedY = useSharedValue(0);
   const eventHandler = useEvent<NativeSyntheticEvent<NativeScrollEvent>>(
     (event: ReanimatedEvent<NativeSyntheticEvent<NativeScrollEvent>>) => {
       'worklet';
-      offset.value =
-        event.contentOffset.x === 0
-          ? event.contentOffset.y
-          : event.contentOffset.x;
+      const cx = event.contentOffset.x;
+      const cy = event.contentOffset.y;
+      offset.value = cx === 0 ? cy : cx;
 
-      peers.value.forEach((peer) => {
-        scrollTo(peer, event.contentOffset.x, event.contentOffset.y, false);
-      });
+      if (
+        Math.abs(cx - lastSyncedX.value) >= 1 ||
+        Math.abs(cy - lastSyncedY.value) >= 1
+      ) {
+        lastSyncedX.value = cx;
+        lastSyncedY.value = cy;
+        peers.value.forEach((peer) => {
+          scrollTo(peer, cx, cy, false);
+        });
+      }
     },
     scrollNativeEventNames
   ) as unknown as EventHandlerInternal<NativeSyntheticEvent<NativeScrollEvent>>;

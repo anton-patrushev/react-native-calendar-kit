@@ -5,17 +5,13 @@ import {
   cancelAnimation,
   scrollTo,
   useSharedValue,
-  withSpring,
 } from 'react-native-reanimated';
 import { useCalendar } from '../context/CalendarProvider';
 import { clampValues } from '../utils/utils';
 import { Platform } from 'react-native';
 
 const SCALE_FACTOR = 0.5;
-const SPRING_DAMPING = 15;
-const SPRING_STIFFNESS = 100;
-/** Allow overscrolling past min/max by this fraction of zoomScale range. */
-const BOUNDARY_PADDING_FRAC = 0.05;
+const IS_ANDROID = Platform.OS === 'android';
 
 const usePinchToZoom = () => {
   const {
@@ -26,26 +22,30 @@ const usePinchToZoom = () => {
     maxZoomScale,
     offsetY,
     allowPinchToZoom,
+    // Owned by CalendarContainer so the onZoomChange reaction can gate on it.
+    isPinching,
+    scrollVisibleHeightAnim,
   } = useCalendar();
+
+  // Max reachable scroll for a given zoom: contentHeight - viewport (>= 0).
+  const maxOffsetForZoom = (z: number) => {
+    'worklet';
+    return Math.max(0, timelineHeight.value * z - scrollVisibleHeightAnim.value);
+  };
 
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
   const startScale = useSharedValue(1);
   const lastScale = useSharedValue(1);
 
-  // Gesture-start snapshot — used for focal-point anchoring.
-  // We compute the anchor once at gesture start and derive the scroll
-  // offset purely from the zoom ratio change each frame.
+  // Gesture-start snapshots for focal anchoring.
   const startFocalY = useSharedValue(0);
   const startOffsetY = useSharedValue(0);
   const startZoomScale = useSharedValue(1);
 
-  // Exposed to CalendarBody so _onScroll can skip offsetY updates on
-  // Android while pinching (prevents native scroll auto-adjustments
-  // from overwriting our computed offset).
-  const isPinching = useSharedValue(false);
-
-  const boundaryPadding =
-    (maxZoomScale - minZoomScale) * BOUNDARY_PADDING_FRAC;
+  // iOS-only viewport-center anchor translate (APP-5422). iOS freezes the scroll
+  // during the pinch and anchors via this transform (no scrollTo → no shake);
+  // stays 0 on Android, which scrolls for real. See onUpdate.
+  const pinchAnchorTranslate = useSharedValue(0);
 
   const pinchGesture = Gesture.Pinch()
     .onBegin(({ focalY }) => {
@@ -56,6 +56,7 @@ const usePinchToZoom = () => {
       startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
       startZoomScale.value = zoomScale.value;
+      pinchAnchorTranslate.value = 0;
       isPinching.value = true;
     })
     .runOnJS(false)
@@ -64,60 +65,66 @@ const usePinchToZoom = () => {
         return;
       }
       const oldZoomScale = zoomScale.value;
-      // Calculate new zoomScale from gesture scale
       const newGestureScale = startScale.value * scale;
       const scaledDiff = (newGestureScale - lastScale.value) * SCALE_FACTOR;
       const newZoomScale = oldZoomScale * (1 + scaledDiff);
-
-      // Clamp with rubber-band padding
+      // Clamp directly to [min, max] — no overshoot (overshoot bounced on Fabric).
       const clampedZoomScale = clampValues(
         newZoomScale,
-        minZoomScale - boundaryPadding,
-        maxZoomScale + boundaryPadding
-      );
-
-      // Focal-point anchoring using gesture-start snapshot.
-      // anchorFrac = normalized position (0..1) of the focal point in content
-      // space at gesture start. We scale it by the new zoom to get the new
-      // content-space position, then subtract the original viewport focalY
-      // to get the scroll offset that keeps the anchor stationary on screen.
-      const anchorContentY = startFocalY.value + startOffsetY.value;
-      const anchorFrac =
-        anchorContentY / (timelineHeight.value * startZoomScale.value);
-
-      zoomScale.value = clampedZoomScale;
-      const newOffsetY =
-        anchorFrac * timelineHeight.value * clampedZoomScale -
-        startFocalY.value;
-
-      offsetY.value = newOffsetY;
-      scrollTo(verticalListRef, 0, newOffsetY, false);
-      lastScale.value = newGestureScale;
-    })
-    .onEnd(() => {
-      // Spring back to clamped bounds if overscrolled
-      const finalZoomScale = clampValues(
-        zoomScale.value,
         minZoomScale,
         maxZoomScale
       );
-      if (finalZoomScale !== zoomScale.value) {
-        // Recompute target offset using the same anchor from gesture start
+
+      zoomScale.value = clampedZoomScale;
+
+      if (IS_ANDROID) {
+        // Android: real per-frame scrollTo, focal-point anchored. Android has no
+        // iOS-Fabric transform/scroll commit race, so the natural finger anchor
+        // is smooth and the scroll is already settled at release (no reconcile).
         const anchorContentY = startFocalY.value + startOffsetY.value;
         const anchorFrac =
           anchorContentY / (timelineHeight.value * startZoomScale.value);
-        const targetOffset =
-          anchorFrac * timelineHeight.value * finalZoomScale -
-          startFocalY.value;
-
-        zoomScale.value = withSpring(finalZoomScale, {
-          damping: SPRING_DAMPING,
-          stiffness: SPRING_STIFFNESS,
-        });
-        offsetY.value = targetOffset;
-        scrollTo(verticalListRef, 0, targetOffset, false);
+        const newOffsetY = clampValues(
+          anchorFrac * timelineHeight.value * clampedZoomScale -
+            startFocalY.value,
+          0,
+          maxOffsetForZoom(clampedZoomScale)
+        );
+        offsetY.value = newOffsetY;
+        scrollTo(verticalListRef, 0, newOffsetY, false);
+      } else {
+        // iOS: frozen scroll, anchor via transform only (no scrollTo → no shake).
+        // δ keeps the viewport-center content fixed: it solves
+        // a*z + δ - startOffsetY = vh/2 for a = (startOffsetY + vh/2)/startZoom.
+        const vh = scrollVisibleHeightAnim.value;
+        const anchorDelta =
+          startZoomScale.value > 0
+            ? (startOffsetY.value + vh / 2) *
+              (1 - clampedZoomScale / startZoomScale.value)
+            : 0;
+        pinchAnchorTranslate.value = anchorDelta;
       }
-      // Reset gesture scale trackers (NOT zoomScale — it persists)
+      lastScale.value = newGestureScale;
+    })
+    .onEnd(() => {
+      // Android scroll tracked live — already settled, nothing to reconcile.
+      if (IS_ANDROID) {
+        lastScale.value = 1;
+        startScale.value = 1;
+        return;
+      }
+      // iOS: commit the frozen scroll to the anchored position (startOffsetY - δ,
+      // clamped to range) and clear δ.
+      const z = zoomScale.value;
+      const delta = pinchAnchorTranslate.value;
+      const targetScroll = clampValues(
+        startOffsetY.value - delta,
+        0,
+        maxOffsetForZoom(z)
+      );
+      offsetY.value = targetScroll;
+      pinchAnchorTranslate.value = 0;
+      scrollTo(verticalListRef, 0, targetScroll, false);
       lastScale.value = 1;
       startScale.value = 1;
     })
@@ -190,7 +197,12 @@ const usePinchToZoom = () => {
     };
   }, [onWheel, verticalListRef]);
 
-  return { pinchGesture, pinchGestureRef, isPinching };
+  return {
+    pinchGesture,
+    pinchGestureRef,
+    isPinching,
+    pinchAnchorTranslate,
+  };
 };
 
 export default usePinchToZoom;

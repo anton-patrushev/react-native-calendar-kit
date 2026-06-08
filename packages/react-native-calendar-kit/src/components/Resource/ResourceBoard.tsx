@@ -33,14 +33,15 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
     totalSlots,
     columnWidth,
     minuteHeight,
-    renderCustomHorizontalLine,
     visibleDateUnixAnim,
     start,
     resourcePerPage,
     spaceFromBottom,
     timelineHeight,
-    showQuarterHourLines,
     dayEndLineStyle: dayEndLineStyleFromContext,
+    zoomScale,
+    showQuarterHourLines,
+    renderCustomHorizontalLine,
   } = useBody();
   const { timeZone } = useTimezone();
   const { onPressBackground, onLongPressBackground } = useActions();
@@ -49,6 +50,77 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
   const contentView = useAnimatedStyle(() => ({
     height: timelineHeight.value - spaceFromTop - spaceFromBottom,
   }));
+
+  // Mirror TimelineBoard's horizontal-line layer for resource mode. Lines
+  // were relocated from a body-level overlay into TimelineBoard (to paint
+  // over opaque UnavailableHours), but ResourceBoard never received them,
+  // so multi-provider grids lost their hour rows. Single counter-scale
+  // wrapper keeps each line at 1px and zoom-positioned with one
+  // useAnimatedStyle per board (vs per-line).
+  const horizontalLinesWrapperStyle = useAnimatedStyle(() => {
+    const totalH = timelineHeight.value - spaceFromTop - spaceFromBottom;
+    const z = zoomScale.value;
+    return {
+      height: totalH * z,
+      transform: [{ translateY: (totalH * (1 - z)) / 2 }, { scaleY: 1 / z }],
+    };
+  });
+
+  const horizontalLines = useMemo(() => {
+    const lines: React.ReactNode[] = [];
+    for (let i = 0; i < totalSlots; i++) {
+      lines.push(
+        <HorizontalLine
+          key={i}
+          borderColor={colors.border}
+          index={i}
+          totalSlots={totalSlots}
+          renderCustomHorizontalLine={renderCustomHorizontalLine}
+        />
+      );
+      if (showQuarterHourLines) {
+        lines.push(
+          <HorizontalLine
+            key={`${i}.25`}
+            borderColor={colors.border}
+            index={i + 0.25}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
+      lines.push(
+        <HorizontalLine
+          key={`${i}.5`}
+          borderColor={colors.border}
+          index={i + 0.5}
+          totalSlots={totalSlots}
+          renderCustomHorizontalLine={renderCustomHorizontalLine}
+        />
+      );
+      if (showQuarterHourLines) {
+        lines.push(
+          <HorizontalLine
+            key={`${i}.75`}
+            borderColor={colors.border}
+            index={i + 0.75}
+            totalSlots={totalSlots}
+            renderCustomHorizontalLine={renderCustomHorizontalLine}
+          />
+        );
+      }
+    }
+    lines.push(
+      <HorizontalLine
+        key={totalSlots}
+        borderColor={colors.border}
+        index={totalSlots}
+        totalSlots={totalSlots}
+        renderCustomHorizontalLine={renderCustomHorizontalLine}
+      />
+    );
+    return lines;
+  }, [totalSlots, colors.border, renderCustomHorizontalLine, showQuarterHourLines]);
 
   const onPress = (event: GestureResponderEvent) => {
     const dayUnix = visibleDateUnixAnim.value;
@@ -135,70 +207,6 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
     return lines;
   }, [resources.length, colors.border, columnWidth, resourcePerPage, isDayEnd, isDayStart, resolvedDayEndLineStyle]);
 
-  const _renderHorizontalLines = useMemo(() => {
-    const rows: React.ReactNode[] = [];
-    for (let i = 0; i < totalSlots; i++) {
-      // Full hour line (:00)
-      rows.push(
-        <HorizontalLine
-          key={i}
-          borderColor={colors.border}
-          index={i}
-          totalSlots={totalSlots}
-          renderCustomHorizontalLine={renderCustomHorizontalLine}
-        />
-      );
-
-      // Quarter hour line (:15) - only when showQuarterHourLines is enabled
-      if (showQuarterHourLines) {
-        rows.push(
-          <HorizontalLine
-            key={`${i}.25`}
-            borderColor={colors.border}
-            index={i + 0.25}
-            totalSlots={totalSlots}
-            renderCustomHorizontalLine={renderCustomHorizontalLine}
-          />
-        );
-      }
-
-      // Half hour line (:30)
-      rows.push(
-        <HorizontalLine
-          key={`${i}.5`}
-          borderColor={colors.border}
-          index={i + 0.5}
-          totalSlots={totalSlots}
-          renderCustomHorizontalLine={renderCustomHorizontalLine}
-        />
-      );
-
-      // Three-quarter hour line (:45) - only when showQuarterHourLines is enabled
-      if (showQuarterHourLines) {
-        rows.push(
-          <HorizontalLine
-            key={`${i}.75`}
-            borderColor={colors.border}
-            index={i + 0.75}
-            totalSlots={totalSlots}
-            renderCustomHorizontalLine={renderCustomHorizontalLine}
-          />
-        );
-      }
-    }
-
-    rows.push(
-      <HorizontalLine
-        key={totalSlots}
-        borderColor={colors.border}
-        index={totalSlots}
-        totalSlots={totalSlots}
-        renderCustomHorizontalLine={renderCustomHorizontalLine}
-      />
-    );
-    return rows;
-  }, [totalSlots, colors.border, renderCustomHorizontalLine, showQuarterHourLines]);
-
   return (
     <View style={styles.container}>
       <Animated.View
@@ -225,7 +233,17 @@ const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: Resour
           resources={resources}
           visibleDates={visibleDates}
         />
-        {_renderHorizontalLines}
+      </Animated.View>
+      {/* Sibling of the grid (not child) — paints over the opaque
+          UnavailableHours bgs, below events (rendered later in BodyResourceItem). */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.horizontalLines,
+          { top: EXTRA_HEIGHT + spaceFromTop },
+          horizontalLinesWrapperStyle,
+        ]}>
+        {horizontalLines}
       </Animated.View>
       {!!resources?.length && _renderVerticalLines}
     </View>
@@ -240,5 +258,11 @@ const styles = StyleSheet.create({
     marginLeft: -0.5,
   },
   calendarGrid: { width: '100%' },
+  horizontalLines: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
   touchable: { flex: 1 },
 });

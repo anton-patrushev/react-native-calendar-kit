@@ -266,10 +266,10 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
   const columnWidth = (calendarLayout.width - hourWidth) / numberOfDays;
 
+  // TimeColumn now renders at body level in every mode (see CalendarBody),
+  // so the grid area always excludes hourWidth.
   const calendarGridWidth = isSingleDay
-    ? isResourceMode
-      ? calendarLayout.width - hourWidth
-      : calendarLayout.width
+    ? calendarLayout.width - hourWidth
     : columnWidth * columns;
 
   const calendarListRef = useRef<CalendarListRef | null>(null);
@@ -356,6 +356,14 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       ? clampValues(initialZoomScale, minZoomScale, maxZoomScale)
       : 1.0
   );
+  // Owned here (instead of inside usePinchToZoom) so the onZoomChange
+  // reaction below can gate emissions on whether a pinch is in progress.
+  const isPinching = useSharedValue(false);
+  // True while the post-pinch overscroll spring is settling — kept separate
+  // from isPinching so the gesture itself can release while the spring is
+  // still animating. The reaction below treats `isPinching || isSettling`
+  // as "still interactive" and only emits onZoomChange once both are false.
+  const isSettling = useSharedValue(false);
   const eventsRef = useRef<EventsRef>(null);
 
   const extraHeight = spaceFromTop + spaceFromBottom;
@@ -371,20 +379,41 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   const startOffset = useDerivedValue(() => start * minuteHeight.value);
 
   // Emit zoom percentage changes via callback.
+  //
+  // Emissions are deferred to gesture end: during a pinch this would fire
+  // ~once per integer percent (≈100 callbacks/sec), and each call lands on
+  // the JS thread where consumers typically do `setState` → React commit
+  // mid-pinch → visible shake. We instead emit once when `isPinching`
+  // transitions from `true` to `false` (gesture released) with the final
+  // zoom percent. Programmatic / spring-overshoot percent changes that
+  // happen outside a pinch still emit normally.
+  //
   // Clamp zoomScale to [min, max] before computing percent so that
   // rubber-band / spring overshoot doesn't report out-of-range values.
   useAnimatedReaction(
     () => {
       const range = maxZoomScale - minZoomScale;
-      if (range === 0) return 0;
       const clamped = clampValues(zoomScale.value, minZoomScale, maxZoomScale);
-      return Math.round(
-        ((clamped - minZoomScale) / range) * 100
-      );
+      const zoomPercent =
+        range === 0 ? 0 : Math.round(((clamped - minZoomScale) / range) * 100);
+      // "Interacting" covers both the live pinch AND the post-release
+      // settle spring. The reaction only fires onZoomChange once this flag
+      // transitions from true to false (i.e. settle complete) or when
+      // zoomPercent changes outside any interaction (programmatic zoom).
+      const interacting = isPinching.value || isSettling.value;
+      return { interacting, zoomPercent };
     },
-    (zoomPercent, prevZoomPercent) => {
-      if (onZoomChange && zoomPercent !== prevZoomPercent) {
-        runOnJS(onZoomChange)(zoomPercent);
+    (current, previous) => {
+      if (!onZoomChange || !current) return;
+      const justEndedInteraction =
+        !!previous && previous.interacting && !current.interacting;
+      const percentChangedWhileIdle =
+        !!previous &&
+        !current.interacting &&
+        !previous.interacting &&
+        previous.zoomPercent !== current.zoomPercent;
+      if (justEndedInteraction || percentChangedWhileIdle) {
+        runOnJS(onZoomChange)(current.zoomPercent);
       }
     }
   );
@@ -1072,6 +1101,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       zoomScale,
       minZoomScale,
       maxZoomScale,
+      isPinching,
+      isSettling,
     }),
     [
       calendarLayout,
@@ -1132,6 +1163,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       zoomScale,
       minZoomScale,
       maxZoomScale,
+      isPinching,
+      isSettling,
     ]
   );
 
