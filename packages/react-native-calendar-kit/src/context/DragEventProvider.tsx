@@ -169,6 +169,7 @@ const DragEventProvider: FC<
     timelineHeight,
     verticalListRef,
     minuteHeight,
+    zoomScale,
     calendarGridWidth,
     visibleDateUnixAnim,
     visibleDateUnix,
@@ -845,7 +846,8 @@ const DragEventProvider: FC<
     }
 
     const scrollInterval = () => {
-      const maxOffsetY = timelineHeight.value - scrollVisibleHeightAnim.value;
+      const maxOffsetY =
+        timelineHeight.value * zoomScale.value - scrollVisibleHeightAnim.value;
       const targetOffset = isAtTopEdge
         ? Math.max(0, offsetY.value - offsetYAnim.value)
         : Math.min(offsetY.value + offsetYAnim.value, maxOffsetY);
@@ -856,7 +858,7 @@ const DragEventProvider: FC<
             initialDragState.value;
 
           const diffY = targetOffset - offsetY.value;
-          const minutes = diffY / minuteHeight.value;
+          const minutes = diffY / (minuteHeight.value * zoomScale.value);
           if (dragSelectedType.value === 'bottom') {
             const nextDuration = Math.max(
               dragStep,
