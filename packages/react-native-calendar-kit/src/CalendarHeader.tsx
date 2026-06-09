@@ -445,6 +445,11 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
               ) : (
                 <CalendarListView
                   animatedRef={dayBarListRef}
+                  // Match the ResourceListView branch: without an explicit
+                  // height the inner ScrollView collapses to 0 and the header
+                  // cells (height: '100%') resolve to 0px — rendered but
+                  // invisible in byDay mode.
+                  height={dayBarHeight}
                   count={calendarData.count}
                   width={calendarGridWidth}
                   renderItem={_renderHeaderItem}
