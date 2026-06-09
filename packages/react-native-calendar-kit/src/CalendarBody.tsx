@@ -33,7 +33,6 @@ import { useActions } from './context/ActionsProvider';
 import type { BodyContextProps } from './context/BodyContext';
 import { BodyContext } from './context/BodyContext';
 import { useCalendar } from './context/CalendarProvider';
-import { useResources } from './context/EventsProvider';
 import { useLocale } from './context/LocaleProvider';
 import useDragEventGesture from './hooks/useDragEventGesture';
 import useDragToCreateGesture from './hooks/useDragToCreateGesture';
@@ -120,6 +119,15 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
     daySnapOffsets,
     handleResourceScrollOffsetChange,
     zoomScale,
+    // Prop-synced resources (from CalendarProvider), NOT the EventsProvider
+    // store. `enableResourceScroll` and `dateResourceItems` (above) are both
+    // derived from the `resources` PROP in CalendarContainer, so the body must
+    // read resources from the same source — otherwise the layout decision
+    // (prop) and the layout data (store) come from two clocks. The store lags
+    // the prop by a commit (it is written in notifyDataChanged's effect) and
+    // can strand on a stale value, which renders the resource grid blank while
+    // the body still thinks it is in resource mode.
+    resources,
   } = useCalendar();
   const {
     onTouchStart,
@@ -130,7 +138,6 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
 
   const locale = useLocale();
   const { onRefresh, onLoad } = useActions();
-  const resources = useResources();
   const scrollProps = useSyncedList({
     id: ScrollType.calendarGrid,
   });
