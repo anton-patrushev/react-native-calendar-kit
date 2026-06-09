@@ -117,12 +117,14 @@ const EventsProvider: ForwardRefRenderFunction<
     events: EventItem[] | undefined;
     timeZone: string | undefined;
     pagesPerSide: number | undefined;
+    resources: ResourceItem[] | undefined;
     minUnix: number;
     maxUnix: number;
   }>({
     events: undefined,
     timeZone: undefined,
     pagesPerSide: undefined,
+    resources: undefined,
     minUnix: 0,
     maxUnix: 0,
   });
@@ -149,12 +151,24 @@ const EventsProvider: ForwardRefRenderFunction<
       const eventsSame = cached.events === events;
       const tzSame = cached.timeZone === timeZone;
       const ppsSame = cached.pagesPerSide === pagesPerSide;
+      // `resources` is both written into the store below and fed to
+      // `populateEvents` (it decides which column an event packs into), so a
+      // change to it MUST force a recompute. Omitting it here strands the
+      // store at a stale resource set: on a single -> multi provider switch
+      // (events ref unchanged) the gate would skip, the store would keep its
+      // old `resources`, and the body's ResourceListView — which reads the
+      // store — would render `count: 0` columns (blank/white) while the
+      // layout still thinks it is in resource mode. Identity compare is enough:
+      // the `resources` prop is memoized upstream and only changes reference
+      // when its contents change, so steady-state swipes still hit the skip.
+      const resourcesSame = cached.resources === resources;
       const offsetMs = offset * 86400000;
       const marginMs = offsetMs; // one page of margin on each side
       if (
         eventsSame &&
         tzSame &&
         ppsSame &&
+        resourcesSame &&
         minUnix + marginMs >= cached.minUnix &&
         maxUnix - marginMs <= cached.maxUnix
       ) {
@@ -164,6 +178,7 @@ const EventsProvider: ForwardRefRenderFunction<
         events,
         timeZone,
         pagesPerSide,
+        resources,
         minUnix,
         maxUnix,
       };
