@@ -191,11 +191,14 @@ describe('scrollMath', () => {
       });
 
       it('always keeps column within [0, columnsPerPage) across a dense offset sweep', () => {
+        const violations: { offset: number; column: number }[] = [];
         for (let offset = -1000; offset <= 200000; offset += 0.37) {
           const { column } = computeColumnState(offset, itemSize, columnsPerPage);
-          expect(column).toBeGreaterThanOrEqual(0);
-          expect(column).toBeLessThan(columnsPerPage);
+          if (column < 0 || column >= columnsPerPage) {
+            violations.push({ offset, column });
+          }
         }
+        expect(violations).toEqual([]);
       });
     });
 

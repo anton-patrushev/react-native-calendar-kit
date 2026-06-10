@@ -35,6 +35,13 @@ export interface ColumnState {
  * Ported from the worklet decode in `CalendarList/index.tsx` (the JS
  * `handleColumnChanged` variant is identical except it lacks the
  * `columnsPerPage > 0` guard on the column width).
+ *
+ * Deliberate deviation: the column clamp
+ * `Math.max(0, Math.min(columnsPerPage - 1, rawColumn))` exists in NEITHER
+ * legacy path — both emit the raw `Math.round` result, including `-0` at
+ * exact half-boundaries (e.g. offset 166.5 in day mode) and out-of-range
+ * readings at page boundaries. The clamp is added intentionally to
+ * normalize those legacy edge readings; everything else is behavior-exact.
  */
 export function computeColumnState(
   offset: number,
@@ -57,6 +64,11 @@ export interface SnapConfig {
   snapToOffsets?: number[];
   disableIntervalMomentum: boolean;
   decelerationRate?: 'fast';
+  /**
+   * Constant `false` by design — there is no `true` branch. New-engine
+   * policy: never use native `pagingEnabled`; snapping is always driven by
+   * explicit indices/offsets plus `disableIntervalMomentum`.
+   */
   pagingEnabled: boolean;
 }
 
@@ -64,15 +76,21 @@ export interface SnapConfig {
  * Builds the cross-platform snap policy for the horizontal list.
  *
  * - `snapToInterval` set (scrollByDay multi-day mode, interval = column
- *   width): enumerate one snap offset per column per page, exactly like the
- *   previous `CalendarListView` enumeration — but on BOTH platforms (no
- *   `Platform.OS` branching).
- * - `snapToInterval` not set (plain day/week paging): snap to every item
- *   index — the list converts indices to exact pixel offsets from real item
- *   positions, so fractional page widths cannot drift. Explicit snap points
- *   make `disableIntervalMomentum` engage, capping a flick at one page
+ *   width): faithful port of the previous `CalendarListView` per-column
+ *   enumeration — one snap offset per column per page. The legacy
+ *   enumeration never branched on `Platform.OS`, and neither does this.
+ * - `snapToInterval` not set (plain day/week paging): NEW cross-platform
+ *   `snapToIndices` policy that REPLACES the legacy platform split (legacy:
+ *   iOS-only page-offset enumeration, Android fell back to native
+ *   `pagingEnabled`). Snapping to every item index lets the list convert
+ *   indices to exact pixel offsets from real item positions, so fractional
+ *   page widths cannot drift. Explicit snap points make
+ *   `disableIntervalMomentum` engage, capping a flick at one page
  *   (`pagingEnabled` alone does not constrain momentum on the
- *   New-Architecture ScrollView).
+ *   New-Architecture ScrollView). The legacy Android freeze concern (a
+ *   stale offset array rebuilt in render) does not apply here:
+ *   `@legendapp/list` computes and maintains the snap offsets natively from
+ *   real item positions instead of rebuilding them in render.
  * - `count <= 1`: nothing to snap between.
  */
 export function buildSnapConfig(params: {
