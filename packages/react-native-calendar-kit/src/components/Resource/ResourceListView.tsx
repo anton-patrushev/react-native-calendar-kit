@@ -195,15 +195,23 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
     // it with zIndex:1 — already above the grid in paint order. We additionally
     // wrap the overlay content in a high-zIndex container so the resource
     // draggable event reliably floats above grid cells regardless of platform
-    // paint order, matching the previous zIndex:999. `pointerEvents="box-none"`
-    // is provided by the engine's overlay wrapper, so drag touches still reach
-    // ResourceDraggableEvent while taps fall through to the grid.
+    // paint order, matching the previous zIndex:999. This wrapper MUST carry
+    // `pointerEvents="box-none"` itself: it stretches to the full content
+    // size in front of the grid, and the engine's own `box-none` overlay
+    // wrappers only exempt themselves, not this descendant. Without it this
+    // `auto` view intercepts empty-slot taps (onPressBackground), event taps
+    // (onPressEvent) and tap-feedback in resource mode. With `box-none`, drag
+    // touches still reach ResourceDraggableEvent (a receptive child) while
+    // taps on empty areas fall through to the grid.
     const overlayChildren = useMemo(() => {
       if (!renderOverlay) {
         return null;
       }
       return (
-        <View id="overlay-view" style={styles.overlayContent}>
+        <View
+          id="overlay-view"
+          style={styles.overlayContent}
+          pointerEvents="box-none">
           {renderOverlay({ totalSize, resources: resources ?? [] })}
         </View>
       );
