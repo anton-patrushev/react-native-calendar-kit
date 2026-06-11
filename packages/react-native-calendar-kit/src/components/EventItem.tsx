@@ -1,4 +1,3 @@
-import isEqual from 'lodash.isequal';
 import type { FC } from 'react';
 import React, { useCallback, useMemo } from 'react';
 import {
@@ -16,6 +15,7 @@ import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
 import type { OnEventResponse, PackedEvent, SizeAnimation } from '../types';
 import { parseDateTime } from '../utils/dateUtils';
+import { eventItemPropsAreEqual } from './eventItemEqual';
 import Text from './Text';
 
 interface EventItemProps {
@@ -355,17 +355,11 @@ const EventItem: FC<EventItemProps> = ({
   );
 };
 
-export default React.memo(EventItem, (prev, next) => {
-  return (
-    isEqual(prev.event, next.event) &&
-    isEqual(prev.visibleDates, next.visibleDates) &&
-    prev.startUnix === next.startUnix &&
-    prev.renderEvent === next.renderEvent &&
-    prev.isDragging === next.isDragging &&
-    prev.onPressEvent === next.onPressEvent &&
-    prev.onLongPressEvent === next.onLongPressEvent
-  );
-});
+// Field-level comparator (see eventItemEqual.ts): reference fast path on the
+// packed event, then a flat compare of only the scalars/refs the render reads.
+// No lodash deep-walk — that ran for every resident event on every parent
+// render and dominated page-render cost under list recycling.
+export default React.memo(EventItem, eventItemPropsAreEqual);
 
 const styles = StyleSheet.create({
   container: { position: 'absolute', overflow: 'hidden' },

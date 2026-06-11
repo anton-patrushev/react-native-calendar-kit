@@ -376,6 +376,37 @@ export const useAllDayEventsByDay = (date: number) => {
   return state;
 };
 
+// Equality fn for the `useRegularEvents` selection. The selector rebuilds the
+// `data` array on every store read (it spreads per-day event arrays into a
+// fresh array), so an unchanged store still yields a new array reference —
+// which would otherwise force a re-map of every page's events on any store
+// notification. A shallow compare (same length, same element references) lets
+// `useSyncExternalStoreWithSelector` keep the previous selection when nothing
+// actually changed. Element references are stable across reads because the
+// store only allocates new PackedEvent objects when it recomputes.
+const regularEventsSelectionIsEqual = (
+  a: { data: PackedEvent[] },
+  b: { data: PackedEvent[] }
+): boolean => {
+  if (a === b) {
+    return true;
+  }
+  const aData = a.data;
+  const bData = b.data;
+  if (aData === bData) {
+    return true;
+  }
+  if (aData.length !== bData.length) {
+    return false;
+  }
+  for (let i = 0; i < aData.length; i++) {
+    if (aData[i] !== bData[i]) {
+      return false;
+    }
+  }
+  return true;
+};
+
 export const useRegularEvents = (
   date: number,
   numberOfDays: number,
@@ -420,7 +451,8 @@ export const useRegularEvents = (
   const state = useSyncExternalStoreWithSelector(
     eventsContext.subscribe,
     eventsContext.getState,
-    selectorByDate
+    selectorByDate,
+    regularEventsSelectionIsEqual
   );
   return state;
 };

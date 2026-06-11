@@ -43,6 +43,13 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const lastHapticAt = useRef(0);
+  // Last dayIndex we actually processed. onVisibleColumnChanged fires once per
+  // column (~7×/page on a week swipe) but the derived dayIndex only advances
+  // when the leading visible column crosses a day boundary. When it hasn't
+  // moved, every downstream step is a no-op repeat (same visibleWeeks, same
+  // visibleDateUnix, same debounce target) — so we bail before any
+  // clearTimeout/setTimeout or shared-value write churn.
+  const lastDayIndex = useRef<number | null>(null);
 
   const onVisibleColumnChanged = useCallback(
     (props: {
@@ -59,6 +66,16 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
         linkedScrollGroup.getActiveId() || ScrollType.calendarGrid;
       if (activeId === id.toString() && visibleColumns && visibleDates) {
         const dayIndex = pageIndex * columns + column;
+        // Early bail on redundant no-op columns: when the leading column
+        // hasn't crossed a day boundary, dayIndex is unchanged and every
+        // derived value below (visibleWeeks, visibleDateUnix, debounce target)
+        // would be identical to last time. Skipping here avoids the per-column
+        // clearTimeout/setTimeout reset and the visibleDateUnixAnim write.
+        // Placed after the active-id gate so the gate semantics are intact.
+        if (lastDayIndex.current === dayIndex) {
+          return;
+        }
+        lastDayIndex.current = dayIndex;
         const visibleStart = visibleDates[pageIndex * columns];
 
         const visibleEnd =
