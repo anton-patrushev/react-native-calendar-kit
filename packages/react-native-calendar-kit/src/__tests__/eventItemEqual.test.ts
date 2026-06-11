@@ -188,4 +188,94 @@ describe('eventItemPropsAreEqual', () => {
       ).toBe(true);
     });
   });
+
+  describe('default render path: fields outside the compared set', () => {
+    it('stays equal when an uncompared field changes (no renderEvent)', () => {
+      // A custom renderer would read this; the DEFAULT render does not, so the
+      // memo intentionally skips re-rendering. Documents the default-path
+      // contract: only the fixed appearance/layout set is compared.
+      const visibleDates = makeProps().visibleDates;
+      const prev = makeProps({
+        event: makeEvent({ textColor: '#111' } as Partial<PackedEvent>),
+        visibleDates,
+      });
+      const next = makeProps({
+        event: makeEvent({ textColor: '#999' } as Partial<PackedEvent>),
+        visibleDates,
+      });
+      expect(eventItemPropsAreEqual(prev, next)).toBe(true);
+    });
+
+    it('still invalidates when a compared appearance field changes', () => {
+      const visibleDates = makeProps().visibleDates;
+      const prev = makeProps({
+        event: makeEvent({ title: 'A' }),
+        visibleDates,
+      });
+      const next = makeProps({
+        event: makeEvent({ title: 'B' }),
+        visibleDates,
+      });
+      expect(eventItemPropsAreEqual(prev, next)).toBe(false);
+    });
+  });
+
+  describe('custom render path: deep compare', () => {
+    const renderEvent = () => null;
+
+    it('stays equal when the event ref is identical (fast path)', () => {
+      const event = makeEvent();
+      const visibleDates = makeProps().visibleDates;
+      expect(
+        eventItemPropsAreEqual(
+          makeProps({ event, visibleDates, renderEvent }),
+          makeProps({ event, visibleDates, renderEvent })
+        )
+      ).toBe(true);
+    });
+
+    it('stays equal for distinct but deep-equal events', () => {
+      const visibleDates = makeProps().visibleDates;
+      const prev = makeProps({ event: makeEvent(), visibleDates, renderEvent });
+      const next = makeProps({ event: makeEvent(), visibleDates, renderEvent });
+      expect(prev.event).not.toBe(next.event);
+      expect(eventItemPropsAreEqual(prev, next)).toBe(true);
+    });
+
+    it('invalidates when an ARBITRARY uncompared field changes', () => {
+      // `textColor` is not in the default-path compared set, but a custom
+      // renderer reads it — so with renderEvent present it MUST invalidate.
+      const visibleDates = makeProps().visibleDates;
+      const prev = makeProps({
+        event: makeEvent({ textColor: '#111' } as Partial<PackedEvent>),
+        visibleDates,
+        renderEvent,
+      });
+      const next = makeProps({
+        event: makeEvent({ textColor: '#999' } as Partial<PackedEvent>),
+        visibleDates,
+        renderEvent,
+      });
+      expect(eventItemPropsAreEqual(prev, next)).toBe(false);
+    });
+
+    it('invalidates when a deeply-nested field changes', () => {
+      const visibleDates = makeProps().visibleDates;
+      const prev = makeProps({
+        event: makeEvent({
+          timeSegments: { processing: true, trailing: false },
+        } as Partial<PackedEvent>),
+        visibleDates,
+        renderEvent,
+      });
+      const next = makeProps({
+        event: makeEvent({
+          timeSegments: { processing: false, trailing: false },
+        } as Partial<PackedEvent>),
+        visibleDates,
+        renderEvent,
+      });
+      expect(eventItemPropsAreEqual(prev, next)).toBe(false);
+    });
+  });
 });

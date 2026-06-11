@@ -6,10 +6,7 @@ import {
   Pressable,
   type GestureResponderEvent,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useDerivedValue,
-} from 'react-native-reanimated';
+import Animated, { useDerivedValue } from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY } from '../constants';
 import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -255,7 +252,7 @@ const EventItem: FC<EventItemProps> = ({
   const baseBorderRadius =
     typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
       ?.borderRadius === 'number'
-      ? ((theme.eventContainerStyle as { borderRadius: number }).borderRadius)
+      ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
       : 2;
   // Static base radius — no per-event animated counter-scale. At high
   // zoom the corner curve elongates slightly along Y (RN can't express
@@ -275,7 +272,7 @@ const EventItem: FC<EventItemProps> = ({
     const borderColor =
       theme.overlapEventBorderColor === null
         ? undefined
-        : theme.overlapEventBorderColor ?? '#FFF';
+        : (theme.overlapEventBorderColor ?? '#FFF');
 
     const borderWidth =
       theme.overlapEventBorderWidth !== undefined

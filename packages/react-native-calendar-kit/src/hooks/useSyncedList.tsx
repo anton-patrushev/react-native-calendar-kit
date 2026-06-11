@@ -30,8 +30,25 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
   const isDragging = useRef(false);
   const isPendingDateChanged = useRef<boolean>(false);
 
+  // Last dayIndex we actually processed. onVisibleColumnChanged fires once per
+  // column (~7×/page on a week swipe) but the derived dayIndex only advances
+  // when the leading visible column crosses a day boundary. When it hasn't
+  // moved, every downstream step is a no-op repeat (same visibleWeeks, same
+  // visibleDateUnix, same debounce target) — so we bail before any
+  // clearTimeout/setTimeout or shared-value write churn.
+  const lastDayIndex = useRef<number | null>(null);
+
   const onScrollBeginDrag = useCallback(() => {
     isDragging.current = true;
+    // Reset the dedupe cache when THIS list becomes the user-driven scroller.
+    // While another list drove the group, the active-id gate blocked this
+    // list's column callbacks, so `lastDayIndex` is stale (it reflects the last
+    // index processed while this list was active). If the user grabs this list
+    // and a programmatic scroll then lands it on a dayIndex equal to that stale
+    // value, the early bail (below) would swallow the only callback and the
+    // handshake debounce would never fire. Clearing here forces the next column
+    // to run the full path.
+    lastDayIndex.current = null;
   }, []);
 
   const onMomentumScrollBegin = useCallback(() => {
@@ -43,13 +60,6 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const lastHapticAt = useRef(0);
-  // Last dayIndex we actually processed. onVisibleColumnChanged fires once per
-  // column (~7×/page on a week swipe) but the derived dayIndex only advances
-  // when the leading visible column crosses a day boundary. When it hasn't
-  // moved, every downstream step is a no-op repeat (same visibleWeeks, same
-  // visibleDateUnix, same debounce target) — so we bail before any
-  // clearTimeout/setTimeout or shared-value write churn.
-  const lastDayIndex = useRef<number | null>(null);
 
   const onVisibleColumnChanged = useCallback(
     (props: {
@@ -72,7 +82,16 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
         // would be identical to last time. Skipping here avoids the per-column
         // clearTimeout/setTimeout reset and the visibleDateUnixAnim write.
         // Placed after the active-id gate so the gate semantics are intact.
-        if (lastDayIndex.current === dayIndex) {
+        //
+        // NEVER bail while a programmatic handshake is pending. A single-column
+        // programmatic goToDate can land the body on a dayIndex equal to a
+        // stale `lastDayIndex` (set while another list drove the group); bailing
+        // would swallow the only callback, so the 150ms debounce never fires,
+        // `triggerDateChanged.current` stays set, and the next
+        // goToNextPage/goToPrevPage hits its `if (triggerDateChanged.current)
+        // return` guard and hangs. When the handshake token is set, always run
+        // the full path so the debounce can resolve it.
+        if (lastDayIndex.current === dayIndex && !triggerDateChanged.current) {
           return;
         }
         lastDayIndex.current = dayIndex;
