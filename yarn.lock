@@ -2148,6 +2148,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@howljs/calendar-kit@workspace:packages/react-native-calendar-kit"
   dependencies:
+    "@legendapp/list": "npm:3.0.4"
     "@react-native/eslint-config": "npm:^0.73.1"
     "@release-it/conventional-changelog": "npm:^5.0.0"
     "@types/jest": "npm:^29.5.5"
@@ -2573,6 +2574,22 @@ __metadata:
     "@jridgewell/resolve-uri": "npm:^3.1.0"
     "@jridgewell/sourcemap-codec": "npm:^1.4.14"
   checksum: 10/da0283270e691bdb5543806077548532791608e52386cfbbf3b9e8fb00457859d1bd01d512851161c886eb3a2f3ce6fd9bcf25db8edf3bddedd275bd4a88d606
+  languageName: node
+  linkType: hard
+
+"@legendapp/list@npm:3.0.4":
+  version: 3.0.4
+  resolution: "@legendapp/list@npm:3.0.4"
+  dependencies:
+    use-sync-external-store: "npm:^1.5.0"
+  peerDependencies:
+    react: "*"
+  peerDependenciesMeta:
+    react-dom:
+      optional: true
+    react-native:
+      optional: true
+  checksum: 10/eed911ee4e2a6d425840f75f7a2468d2122c8b695f8f62338232bbb7c1b6a26df58217018574f640667ec2a3fa0ea1962406b8e9cfa96c336b260ff12be24da6
   languageName: node
   linkType: hard
 

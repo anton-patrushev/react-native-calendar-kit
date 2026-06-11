@@ -1,17 +1,26 @@
+import {
+  LegendList,
+  type LegendListRef,
+  type LegendListRenderItemProps,
+} from '@legendapp/list/react-native';
 import React, {
   useCallback,
-  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react';
 import {
-  GestureResponderEvent,
+  type GestureResponderEvent,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollView as RNScrollView,
+  type ScrollViewProps,
+  type StyleProp,
+  StyleSheet,
+  View,
+  type ViewStyle,
 } from 'react-native';
 
 import { ScrollView } from 'react-native-gesture-handler';
@@ -20,13 +29,30 @@ import Animated, {
   runOnJS,
   useAnimatedReaction,
   useAnimatedRef,
+  useAnimatedStyle,
   useScrollViewOffset,
   useSharedValue,
 } from 'react-native-reanimated';
-import { HorizontalVirtualizedList } from './HorizontalVirtualizedList';
 import useLatestCallback from '../../hooks/useLatestCallback';
+import {
+  computeColumnState,
+  getMaxOffset as computeMaxOffset,
+  isScrollableOffset,
+} from './scrollMath';
 
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
+
+/**
+ * LegendList injects its internal/combined ref into the props it hands to
+ * `renderScrollComponent` (`useStableRenderComponent` maps `(props, ref)` to
+ * `{...props, ref}`), so spreading is enough to attach it. Keeping the
+ * gesture-handler ScrollView wrapped in `createAnimatedComponent` preserves
+ * gesture interop under GestureDetector and lets Reanimated register the
+ * animated ref for `scrollTo` worklets and tag-based event listeners.
+ */
+const renderScrollComponent = (props: ScrollViewProps) => (
+  <AnimatedScrollView {...props} />
+);
 
 interface CalendarListProps {
   count: number;
@@ -34,15 +60,18 @@ interface CalendarListProps {
   keyExtractor?: (item: number, index: number) => string;
   itemSize: number;
   drawDistance?: number;
+  extraData?: unknown;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   onLayout?: (event: LayoutChangeEvent) => void;
-  style?: any;
-  contentContainerStyle?: any;
+  style?: StyleProp<ViewStyle>;
+  contentContainerStyle?: StyleProp<ViewStyle>;
   initialScrollIndex?: number;
   pagingEnabled?: boolean;
   snapToInterval?: number;
   initialOffset?: number;
   snapToOffsets?: number[];
+  snapToIndices?: number[];
+  disableIntervalMomentum?: boolean;
   animatedRef?: AnimatedRef<Animated.ScrollView>;
   onVisibleColumnChanged?: (props: {
     index: number;
@@ -88,6 +117,15 @@ interface CalendarListProps {
     | undefined;
 
   onWheel?: (event: WheelEvent) => void;
+
+  /**
+   * Content-coordinate overlay rendered above the list. LegendList cannot
+   * host extra children inside its scrolled content, so the overlay is a
+   * sibling view pinned over the viewport whose inner container (sized to
+   * the full content width) counter-translates with the scroll offset —
+   * visually identical to rendering inside the scrolled content.
+   */
+  children?: React.ReactNode;
 }
 
 export interface CalendarListRef {
@@ -95,6 +133,13 @@ export interface CalendarListRef {
   scrollToOffset: (offset: number, animated?: boolean) => void;
   getMaxOffset: (visibleColumns?: number) => number;
   isScrollable: (offset: number, visibleColumns?: number) => boolean;
+}
+
+/** UI-thread sample used to detect page/column boundary crossings. */
+interface ColumnSample {
+  offset: number;
+  pageIndex: number;
+  column: number;
 }
 
 const DEFAULT_DRAW_DISTANCE = 600; // Larger buffer for horizontal scrolling
@@ -111,6 +156,7 @@ export const CalendarList = React.forwardRef<
       keyExtractor = (item) => item.toString(),
       itemSize,
       drawDistance = DEFAULT_DRAW_DISTANCE,
+      extraData,
       onScroll,
       onLayout,
       style,
@@ -120,6 +166,8 @@ export const CalendarList = React.forwardRef<
       snapToInterval,
       initialOffset,
       snapToOffsets,
+      snapToIndices,
+      disableIntervalMomentum,
       onVisibleColumnChanged,
       columnsPerPage,
       extraScrollData,
@@ -133,67 +181,37 @@ export const CalendarList = React.forwardRef<
       onScrollEndDrag,
       onWheel,
       decelerationRate,
+      children,
     },
     ref
   ) => {
-    const scrollViewRef = useRef<ScrollView>(null);
+    const legendListRef = useRef<LegendListRef>(null);
     const isLoaded = useRef(false);
 
     const totalSize = count * itemSize;
 
-    const animScrollRef = useAnimatedRef<Animated.ScrollView>();
+    const internalAnimatedRef = useAnimatedRef<Animated.ScrollView>();
+    const scrollAnimatedRef = animatedRef ?? internalAnimatedRef;
     const internalOffset = useSharedValue(initialOffset ?? 0);
-    const scrollOffsetAnim = useScrollViewOffset(animScrollRef, internalOffset);
+    // Binds `internalOffset` to the ScrollView's UI-thread scroll events.
+    useScrollViewOffset(scrollAnimatedRef, internalOffset);
 
     const extraScrollDataRef = useRef(extraScrollData);
     extraScrollDataRef.current = extraScrollData;
     const onVisibleColumnChangedCb = useLatestCallback(onVisibleColumnChanged);
 
-    // Visible range lives in state directly (not derived from a per-frame
-    // scrollOffset state). The animated reaction below computes it on the
-    // UI thread and only commits to JS when start/end actually change —
-    // intra-range scroll movements no longer re-render this list.
-    const computeRange = useCallback(
-      (offset: number) => {
-        if (count === 0) {
-          return { start: 0, end: 0 };
-        }
-        const buffer = drawDistance;
-        const scrollStart = Math.max(0, offset - buffer);
-        const scrollEnd = offset + itemSize + buffer;
-        const startIndex = Math.max(0, Math.floor(scrollStart / itemSize));
-        const endIndex = Math.min(
-          count - 1,
-          Math.floor(scrollEnd / itemSize)
-        );
-        return { start: startIndex, end: endIndex };
-      },
-      [count, drawDistance, itemSize]
+    const data = useMemo(
+      () => Array.from({ length: count }, (_, index) => index),
+      [count]
     );
 
-    const [visibleRange, setVisibleRange] = useState(() =>
-      computeRange(initialOffset ?? 0)
+    const renderLegendItem = useCallback(
+      ({ item, index }: LegendListRenderItemProps<number>) =>
+        renderItem({ item, index }),
+      [renderItem]
     );
 
-    // Recompute when count/itemSize/drawDistance change (props-driven).
-    useEffect(() => {
-      setVisibleRange((prev) => {
-        const next = computeRange(internalOffset.value);
-        return prev.start === next.start && prev.end === next.end
-          ? prev
-          : next;
-      });
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [computeRange]);
-
-    const updateVisibleRange = useCallback(
-      (start: number, end: number) => {
-        setVisibleRange((prev) =>
-          prev.start === start && prev.end === end ? prev : { start, end }
-        );
-      },
-      []
-    );
+    const getFixedItemSize = useCallback(() => itemSize, [itemSize]);
 
     const getItemPosition = useCallback(
       (index: number) => {
@@ -204,15 +222,14 @@ export const CalendarList = React.forwardRef<
 
     const handleColumnChanged = useCallback(
       (offset: number) => {
-        const columnWidth = itemSize / columnsPerPage;
-        const startIndex = Math.floor(
-          Math.round(offset / columnWidth) / columnsPerPage
+        const { pageIndex, column } = computeColumnState(
+          offset,
+          itemSize,
+          columnsPerPage
         );
-        const startOffset = startIndex * itemSize;
-        const column = Math.round((offset - startOffset) / columnWidth);
 
         onVisibleColumnChangedCb?.({
-          index: startIndex,
+          index: pageIndex,
           column,
           columns: columnsPerPage,
           extraScrollData: extraScrollDataRef.current,
@@ -222,45 +239,41 @@ export const CalendarList = React.forwardRef<
       [itemSize, columnsPerPage, onVisibleColumnChangedCb]
     );
 
-    // Computes column+range on the UI thread per scroll frame and only
-    // dispatches to JS when (a) page/column index changes (for
-    // handleColumnChanged → useSyncedList debounces) or (b) visible
-    // window start/end changes (for virtualization). Prior implementation
-    // fired runOnJS(setScrollOffset) every frame which made the list
-    // re-render at ~60 Hz — expensive when the body subtree is scaled
-    // post-pinch on Fabric.
+    // Decodes the offset into page/column state per scroll frame on the UI
+    // thread and only dispatches to JS when the page/column index changes
+    // (handleColumnChanged → useSyncedList debounces). Visible-window math
+    // lives inside LegendList now (`drawDistance`), so no range bookkeeping
+    // happens here.
+    const lastColumnSample = useSharedValue<ColumnSample | null>(null);
     useAnimatedReaction(
       () => {
-        const offset = scrollOffsetAnim.value;
-        const colWidth = columnsPerPage > 0 ? itemSize / columnsPerPage : itemSize;
-        const colPageIdx = Math.floor(
-          Math.round(offset / colWidth) / columnsPerPage
+        const offset = internalOffset.value;
+        const prev = lastColumnSample.value;
+        if (prev !== null && prev.offset === offset) {
+          // Offset unchanged (repeated scroll events while settling) —
+          // return the previous sample so the reaction sees no change.
+          return prev;
+        }
+        const { columnPageIndex, column } = computeColumnState(
+          offset,
+          itemSize,
+          columnsPerPage
         );
-        const colOff = colPageIdx * itemSize;
-        const col = Math.round((offset - colOff) / colWidth);
-        const buffer = drawDistance;
-        const scrollStart = Math.max(0, offset - buffer);
-        const scrollEnd = offset + itemSize + buffer;
-        const startIndex = Math.max(0, Math.floor(scrollStart / itemSize));
-        const endIndex = Math.min(
-          count - 1,
-          Math.floor(scrollEnd / itemSize)
-        );
-        return { offset, colPageIdx, col, startIndex, endIndex };
+        const next: ColumnSample = {
+          offset,
+          pageIndex: columnPageIndex,
+          column,
+        };
+        lastColumnSample.value = next;
+        return next;
       },
       (curr, prev) => {
-        if (!curr) return;
         const columnChanged =
-          !prev || prev.colPageIdx !== curr.colPageIdx || prev.col !== curr.col;
-        const rangeChanged =
           !prev ||
-          prev.startIndex !== curr.startIndex ||
-          prev.endIndex !== curr.endIndex;
+          prev.pageIndex !== curr.pageIndex ||
+          prev.column !== curr.column;
         if (columnChanged) {
           runOnJS(handleColumnChanged)(curr.offset);
-        }
-        if (rangeChanged) {
-          runOnJS(updateVisibleRange)(curr.startIndex, curr.endIndex);
         }
       }
     );
@@ -270,50 +283,42 @@ export const CalendarList = React.forwardRef<
       () => ({
         scrollToIndex: (index: number, animated: boolean = true) => {
           if (index >= 0 && index < count) {
-            const position = getItemPosition(index);
-            scrollViewRef.current?.scrollTo({
-              x: position,
+            // Exact-offset parity with the previous engine — LegendList's
+            // own scrollToIndex viewPosition semantics are not used.
+            legendListRef.current?.scrollToOffset({
+              offset: index * itemSize,
               animated,
             });
           }
         },
         scrollToOffset: (offset: number, animated: boolean = true) => {
-          scrollViewRef.current?.scrollTo({
-            x: offset,
-            animated,
-          });
+          legendListRef.current?.scrollToOffset({ offset, animated });
         },
         getMaxOffset: (visibleColumns?: number) => {
-          if (!visibleColumns || !columnsPerPage) {
-            return totalSize - itemSize;
-          }
-
-          const columnWidth = itemSize / columnsPerPage;
-          return totalSize - columnWidth * visibleColumns;
+          return computeMaxOffset({
+            count,
+            itemSize,
+            columnsPerPage,
+            visibleColumns: visibleColumns ?? 0,
+          });
         },
         isScrollable: (offset: number, visibleColumns?: number) => {
-          let maxOffset: number;
-          if (!visibleColumns || !columnsPerPage) {
-            maxOffset = totalSize - itemSize;
-          } else {
-            const columnWidth = itemSize / columnsPerPage;
-            maxOffset = totalSize - columnWidth * visibleColumns;
-          }
-          return (
-            offset >= 0 && offset <= maxOffset && offset !== internalOffset.value
-          );
+          return isScrollableOffset({
+            offset,
+            currentOffset: internalOffset.value,
+            count,
+            itemSize,
+            columnsPerPage,
+            visibleColumns: visibleColumns ?? 0,
+          });
         },
       }),
-      [
-        columnsPerPage,
-        count,
-        getItemPosition,
-        internalOffset,
-        itemSize,
-        totalSize,
-      ]
+      [columnsPerPage, count, internalOffset, itemSize]
     );
 
+    // Re-seeds the scroll position when count/itemSize/initialOffset change
+    // (and applies `initialScrollIndex` on mount), mirroring the previous
+    // engine's prop-driven re-application.
     useLayoutEffect(() => {
       if (count > 0) {
         let offset = initialOffset;
@@ -322,9 +327,10 @@ export const CalendarList = React.forwardRef<
           offset = getItemPosition(targetIndex);
         }
         if (offset !== undefined) {
+          const target = offset;
           setTimeout(() => {
-            scrollViewRef.current?.scrollTo({
-              x: offset,
+            legendListRef.current?.scrollToOffset({
+              offset: target,
               animated: false,
             });
           }, 0);
@@ -332,55 +338,99 @@ export const CalendarList = React.forwardRef<
       }
     }, [initialScrollIndex, count, getItemPosition, initialOffset]);
 
-    useEffect(() => {
+    const handleLoad = useLatestCallback(() => {
       setTimeout(() => {
-        if (!isLoaded.current) {
-          isLoaded.current = true;
-          onLoad?.();
+        if (isLoaded.current) {
+          return;
+        }
+        isLoaded.current = true;
+        onLoad?.();
+        // Initial-offset hardening: horizontal lists can settle away from
+        // `initialScrollOffset` on first render (LegendList issue #458).
+        if (
+          initialOffset !== undefined &&
+          Math.abs(internalOffset.value - initialOffset) > 1
+        ) {
+          legendListRef.current?.scrollToOffset({
+            offset: initialOffset,
+            animated: false,
+          });
         }
       }, 0);
-    }, [onLoad]);
+    });
 
-    return (
-      <AnimatedScrollView
-        ref={(node: any) => {
-          scrollViewRef.current = node;
-          animScrollRef?.(node);
-          animatedRef?.(node);
-        }}
+    const overlayTranslateStyle = useAnimatedStyle(() => ({
+      transform: [{ translateX: -internalOffset.value }],
+    }));
+
+    const list = (
+      <LegendList
+        ref={legendListRef}
+        data={data}
+        renderItem={renderLegendItem}
+        keyExtractor={keyExtractor}
         horizontal={true}
-        style={style}
-        contentContainerStyle={[contentContainerStyle, { width: totalSize }]}
+        getFixedItemSize={getFixedItemSize}
+        estimatedItemSize={itemSize}
+        initialScrollOffset={initialOffset}
+        recycleItems={true}
+        drawDistance={drawDistance}
+        extraData={extraData}
+        onLoad={handleLoad}
+        refScrollView={scrollAnimatedRef as unknown as React.Ref<RNScrollView>}
+        renderScrollComponent={renderScrollComponent}
+        style={children != null ? styles.fill : style}
+        contentContainerStyle={contentContainerStyle}
         onScroll={onScroll}
         onScrollBeginDrag={onScrollBeginDrag}
         onScrollEndDrag={onScrollEndDrag}
         onMomentumScrollBegin={onMomentumScrollBegin}
         onMomentumScrollEnd={onMomentumScrollEnd}
         onLayout={onLayout}
-        contentOffset={{ x: initialOffset ?? 0, y: 0 }}
         scrollEventThrottle={scrollEventThrottle}
         scrollEnabled={scrollEnabled}
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
         pagingEnabled={pagingEnabled}
-        disableIntervalMomentum={!!snapToOffsets || !!snapToInterval}
+        disableIntervalMomentum={
+          disableIntervalMomentum ?? (!!snapToOffsets || !!snapToInterval)
+        }
         snapToInterval={snapToInterval}
-        onTouchStart={onTouchStart}
         snapToOffsets={snapToOffsets}
+        snapToIndices={snapToIndices}
+        onTouchStart={onTouchStart}
         decelerationRate={decelerationRate}
-        {...{ onWheel }}>
-        <HorizontalVirtualizedList
-          count={count}
-          renderItem={renderItem}
-          keyExtractor={keyExtractor}
-          itemSize={itemSize}
-          visibleRange={visibleRange}
-          totalSize={totalSize}
-          getItemPosition={getItemPosition}
-        />
-      </AnimatedScrollView>
+        {...{ onWheel }}
+      />
+    );
+
+    if (children == null) {
+      return list;
+    }
+
+    return (
+      <View style={style}>
+        {list}
+        <Animated.View pointerEvents="box-none" style={styles.overlay}>
+          <Animated.View
+            pointerEvents="box-none"
+            style={[
+              styles.overlayContent,
+              { width: totalSize },
+              overlayTranslateStyle,
+            ]}>
+            {children}
+          </Animated.View>
+        </Animated.View>
+      </View>
     );
   }
 );
 
 CalendarList.displayName = 'CalendarList';
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
+  overlayContent: { height: '100%' },
+});
