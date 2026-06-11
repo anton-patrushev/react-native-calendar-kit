@@ -3,6 +3,7 @@ import {
   GestureResponderEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  StyleSheet,
   View,
 } from 'react-native';
 import Animated, { AnimatedRef } from 'react-native-reanimated';
@@ -175,57 +176,76 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
 
     const effectiveDrawDistance = drawDistance ?? width * 3;
 
-    const overlayElement = useMemo(() => {
+    // The overlay is routed through the engine's `children` slot so it
+    // counter-translates with the horizontal scroll offset (the engine sizes
+    // its inner container to `count * itemSize` and applies
+    // `translateX(-scrollOffset)`). This keeps content-x → screen-x mapping
+    // correct once the list is scrolled (previously the overlay was a static
+    // sibling that did NOT track scroll, so absolutely-positioned content like
+    // ResourceDraggableEvent rendered off by the scroll offset).
+    //
+    // Coordinate space: in dual-axis mode (the only mode that uses
+    // `renderOverlay`), the engine's totalSize = count * itemSize =
+    // itemsLength * itemWidth, which is identical to this component's
+    // `totalSize`, so `renderOverlay`'s internal absolute positioning is
+    // unchanged.
+    //
+    // z-order: the grid items live inside the engine's LegendList (rendered at
+    // flex:1) and the engine overlay is an absolute-fill sibling painted after
+    // it with zIndex:1 — already above the grid in paint order. We additionally
+    // wrap the overlay content in a high-zIndex container so the resource
+    // draggable event reliably floats above grid cells regardless of platform
+    // paint order, matching the previous zIndex:999. `pointerEvents="box-none"`
+    // is provided by the engine's overlay wrapper, so drag touches still reach
+    // ResourceDraggableEvent while taps fall through to the grid.
+    const overlayChildren = useMemo(() => {
       if (!renderOverlay) {
         return null;
       }
       return (
-        <View
-          id="overlay-view"
-          style={{
-            position: 'absolute',
-            height,
-            width: totalSize,
-            zIndex: 999,
-          }}
-          pointerEvents="box-none">
+        <View id="overlay-view" style={styles.overlayContent}>
           {renderOverlay({ totalSize, resources: resources ?? [] })}
         </View>
       );
-    }, [renderOverlay, height, totalSize, resources]);
+    }, [renderOverlay, totalSize, resources]);
 
     return (
-      <View style={{ height, position: 'relative' }}>
-        <CalendarList
-          ref={calendarListRef}
-          animatedRef={ref as AnimatedRef<Animated.ScrollView>}
-          count={count}
-          renderItem={_renderItem}
-          keyExtractor={keyExtractor}
-          itemSize={itemSize}
-          drawDistance={effectiveDrawDistance}
-          onScroll={onScroll}
-          onScrollBeginDrag={onScrollBeginDrag}
-          onScrollEndDrag={onScrollEndDrag}
-          onMomentumScrollBegin={onMomentumScrollBegin}
-          onMomentumScrollEnd={onMomentumScrollEnd}
-          style={{ height }}
-          initialOffset={initialOffset}
-          pagingEnabled={isDualAxisMode ? false : pagingEnabled}
-          snapToInterval={snapToInterval}
-          snapToOffsets={snapToOffsets}
-          columnsPerPage={isDualAxisMode ? 1 : resourcePerPage}
-          onVisibleColumnChanged={handleVisibleColumnChanged}
-          scrollEventThrottle={scrollEventThrottle}
-          scrollEnabled={scrollEnabled}
-          onTouchStart={onTouchStart}
-          onWheel={onWheel}
-          decelerationRate="fast"
-        />
-        {overlayElement}
-      </View>
+      <CalendarList
+        ref={calendarListRef}
+        animatedRef={ref as AnimatedRef<Animated.ScrollView>}
+        count={count}
+        renderItem={_renderItem}
+        keyExtractor={keyExtractor}
+        itemSize={itemSize}
+        drawDistance={effectiveDrawDistance}
+        onScroll={onScroll}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onScrollEndDrag={onScrollEndDrag}
+        onMomentumScrollBegin={onMomentumScrollBegin}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        style={{ height }}
+        initialOffset={initialOffset}
+        pagingEnabled={isDualAxisMode ? false : pagingEnabled}
+        snapToInterval={snapToInterval}
+        snapToOffsets={snapToOffsets}
+        columnsPerPage={isDualAxisMode ? 1 : resourcePerPage}
+        onVisibleColumnChanged={handleVisibleColumnChanged}
+        scrollEventThrottle={scrollEventThrottle}
+        scrollEnabled={scrollEnabled}
+        onTouchStart={onTouchStart}
+        onWheel={onWheel}
+        decelerationRate="fast">
+        {overlayChildren}
+      </CalendarList>
     );
   }
 );
 
 export default ResourceListView;
+
+const styles = StyleSheet.create({
+  // Fills the engine's counter-translating overlay container and stacks the
+  // resource draggable event above the grid cells (parity with the previous
+  // zIndex:999 static overlay).
+  overlayContent: { height: '100%', zIndex: 999 },
+});
