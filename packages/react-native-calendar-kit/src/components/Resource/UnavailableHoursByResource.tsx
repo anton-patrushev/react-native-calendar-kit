@@ -25,7 +25,7 @@ const UnavailableHoursByResource = ({
 
       return (
         <UnavailableHoursByDate
-          key={`UnavailableHours_${currentUnix}_${resources.map(r => r.id).join('-')}`}
+          key={`UnavailableHours_${currentUnix}_${resources.map((r) => r.id).join('-')}`}
           currentUnix={Number(currentUnix)}
           visibleDateIndex={dateInfo.diffDays}
           resources={resources}
