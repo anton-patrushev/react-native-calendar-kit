@@ -73,6 +73,8 @@ export type DragEventContextProps = {
   isDraggingCreateAnim: SharedValue<boolean>;
   isDragging: boolean;
   dragX: SharedValue<number>;
+  isPendingConfirmation: SharedValue<boolean>;
+  requireDragConfirmation: boolean | Array<'edit' | 'create' | 'selected'>;
 };
 
 const DragEventContext = React.createContext<DragEventContextProps | undefined>(
@@ -99,6 +101,8 @@ export type DragEventActionsContextProps = {
     props: DateOrDateTime,
     event: GestureResponderEvent
   ) => void;
+  confirmDrag: () => void;
+  cancelDrag: () => void;
 };
 
 const DragEventActionsContext = React.createContext<
@@ -118,6 +122,7 @@ const DragEventProvider: FC<
     defaultDuration: number;
     hapticService: HapticService;
     resources?: ResourceItem[];
+    requireDragConfirmation: boolean | Array<'edit' | 'create' | 'selected'>;
   }>
 > = ({
   children,
@@ -128,7 +133,20 @@ const DragEventProvider: FC<
   defaultDuration,
   hapticService,
   resources,
+  requireDragConfirmation,
 }) => {
+  // Helper to check if a specific mode requires confirmation
+  const requiresConfirmation = useCallback(
+    (mode: 'edit' | 'create' | 'selected'): boolean => {
+      if (requireDragConfirmation === true) return true;
+      if (requireDragConfirmation === false) return false;
+      if (Array.isArray(requireDragConfirmation)) {
+        return requireDragConfirmation.includes(mode);
+      }
+      return false;
+    },
+    [requireDragConfirmation]
+  );
   // Contexts
   const { timeZone } = useTimezone();
   const {
@@ -164,12 +182,22 @@ const DragEventProvider: FC<
     onDragCreateEventStart,
     onDragCreateEventEnd,
     onLongPressEvent,
+    onDragEventPending,
+    onDragSelectedEventPending,
+    onDragCreateEventPending,
   } = useActions();
 
   const isDraggingAnim = useSharedValue(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isDraggingCreate, setIsDraggingCreate] = useState(false);
   const [draggingEvent, setDraggingEvent] = useState<DraggingEventType>();
+  const isPendingConfirmation = useSharedValue(false);
+
+  // Store pending drag data for confirmation
+  const pendingDragData = useRef<{
+    updatedEvent: Record<string, any>;
+    dragType: 'selected' | 'regular' | 'create';
+  } | null>(null);
 
   const dragStartUnix = useSharedValue<number>(-1);
   const dragStartMinutes = useSharedValue<number>(-1);
@@ -308,6 +336,7 @@ const DragEventProvider: FC<
   const resetDragState = () => {
     setDraggingEvent(undefined);
     setIsDraggingCreate(false);
+    pendingDragData.current = null;
     runOnUI(() => {
       dragStartUnix.value = -1;
       dragDuration.value = -1;
@@ -319,8 +348,33 @@ const DragEventProvider: FC<
       roundedDragDuration.value = -1;
       extraMinutes.value = 0;
       isDraggingSelectedEvent.value = false;
+      isPendingConfirmation.value = false;
     })();
   };
+
+  const confirmDrag = useCallback(async () => {
+    if (!pendingDragData.current) {
+      return;
+    }
+
+    const { updatedEvent, dragType } = pendingDragData.current;
+
+    try {
+      if (dragType === 'selected') {
+        await onDragSelectedEventEnd?.(updatedEvent as SelectedEventType);
+      } else if (dragType === 'create') {
+        await onDragCreateEventEnd?.(updatedEvent as OnCreateEventResponse);
+      } else {
+        await onDragEventEnd?.(updatedEvent as OnEventResponse);
+      }
+    } finally {
+      resetDragState();
+    }
+  }, [onDragSelectedEventEnd, onDragCreateEventEnd, onDragEventEnd]);
+
+  const cancelDrag = useCallback(() => {
+    resetDragState();
+  }, []);
 
   const handleIsDraggingChange = async (dragging: boolean) => {
     if (!dragging) {
@@ -334,23 +388,90 @@ const DragEventProvider: FC<
         resourceId
       );
 
+      // Determine which mode and if it requires confirmation
+      let mode: 'edit' | 'create' | 'selected';
       if (selectedEventId) {
-        const shouldUpdate = shouldUpdateEvent(
-          draggingEvent,
-          newStartUnix,
-          newEndUnix,
-          resourceId
-        );
-        if (shouldUpdate) {
-          await onDragSelectedEventEnd?.(updatedEvent as SelectedEventType);
-        }
+        mode = 'selected';
       } else if (isDraggingCreate) {
-        await onDragCreateEventEnd?.(updatedEvent as OnCreateEventResponse);
+        mode = 'create';
       } else {
-        await onDragEventEnd?.(updatedEvent as OnEventResponse);
+        mode = 'edit';
       }
 
-      resetDragState();
+      const needsConfirmation = requiresConfirmation(mode);
+
+      if (needsConfirmation) {
+        // Enter pending confirmation state
+        isPendingConfirmation.value = true;
+
+        if (selectedEventId) {
+          const shouldUpdate = shouldUpdateEvent(
+            draggingEvent,
+            newStartUnix,
+            newEndUnix,
+            resourceId
+          );
+          if (shouldUpdate) {
+            pendingDragData.current = {
+              updatedEvent,
+              dragType: 'selected',
+            };
+            onDragSelectedEventPending?.(
+              updatedEvent as SelectedEventType,
+              {
+                confirm: confirmDrag,
+                cancel: cancelDrag,
+              }
+            );
+          } else {
+            // No change, just reset
+            resetDragState();
+          }
+        } else if (isDraggingCreate) {
+          pendingDragData.current = {
+            updatedEvent,
+            dragType: 'create',
+          };
+          onDragCreateEventPending?.(
+            updatedEvent as OnCreateEventResponse,
+            {
+              confirm: confirmDrag,
+              cancel: cancelDrag,
+            }
+          );
+        } else {
+          pendingDragData.current = {
+            updatedEvent,
+            dragType: 'regular',
+          };
+          onDragEventPending?.(
+            updatedEvent as OnEventResponse,
+            {
+              confirm: confirmDrag,
+              cancel: cancelDrag,
+            }
+          );
+        }
+      } else {
+        // Original behavior - immediately call callbacks and reset
+        if (selectedEventId) {
+          const shouldUpdate = shouldUpdateEvent(
+            draggingEvent,
+            newStartUnix,
+            newEndUnix,
+            resourceId
+          );
+          if (shouldUpdate) {
+            await onDragSelectedEventEnd?.(updatedEvent as SelectedEventType);
+          }
+        } else if (isDraggingCreate) {
+          await onDragCreateEventEnd?.(updatedEvent as OnCreateEventResponse);
+        } else {
+          await onDragEventEnd?.(updatedEvent as OnEventResponse);
+        }
+
+        resetDragState();
+      }
     }
 
     setIsDragging(dragging);
@@ -1146,6 +1267,8 @@ const DragEventProvider: FC<
       defaultDuration,
       isDraggingCreateAnim,
       dragX,
+      isPendingConfirmation,
+      requireDragConfirmation,
     }),
     [
       dragStep,
@@ -1174,6 +1297,8 @@ const DragEventProvider: FC<
       defaultDuration,
       isDraggingCreateAnim,
       dragX,
+      isPendingConfirmation,
+      requireDragConfirmation,
     ]
   );
 
@@ -1184,6 +1309,8 @@ const DragEventProvider: FC<
       triggerDragCreateEvent: allowDragToCreate
         ? triggerDragCreateEvent
         : undefined,
+      confirmDrag,
+      cancelDrag,
     }),
     [
       allowDragToEdit,
@@ -1191,6 +1318,8 @@ const DragEventProvider: FC<
       triggerDragSelectedEvent,
       allowDragToCreate,
       triggerDragCreateEvent,
+      confirmDrag,
+      cancelDrag,
     ]
   );
 

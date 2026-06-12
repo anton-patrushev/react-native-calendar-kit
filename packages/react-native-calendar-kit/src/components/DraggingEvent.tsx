@@ -4,6 +4,7 @@ import type { ViewStyle } from 'react-native';
 import { StyleSheet, Text, View } from 'react-native';
 import type { SharedValue } from 'react-native-reanimated';
 import Animated, {
+  runOnJS,
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
@@ -246,7 +247,23 @@ const DraggingEventWrapper = ({
   resources,
 }: DraggingEventWrapperProps) => {
   const { isDragging } = useDragEvent();
-  if (!isDragging) {
+  const { isPendingConfirmation } = useDragEvent();
+  const [isVisible, setIsVisible] = React.useState(false);
+
+  // Keep dragging event visible during drag or pending confirmation
+  useAnimatedReaction(
+    () => isPendingConfirmation.value,
+    (pending) => {
+      runOnJS(setIsVisible)(isDragging || pending);
+    },
+    [isDragging]
+  );
+
+  React.useEffect(() => {
+    setIsVisible(isDragging || isPendingConfirmation.value);
+  }, [isDragging, isPendingConfirmation]);
+
+  if (!isVisible) {
     return null;
   }
 

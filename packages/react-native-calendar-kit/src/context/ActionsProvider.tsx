@@ -36,6 +36,13 @@ const ActionsProvider: React.FC<PropsWithChildren<ActionsProviderProps>> = ({
     props.onDragCreateEventStart
   );
   const onDragCreateEventEnd = useLatestCallback(props.onDragCreateEventEnd);
+  const onDragEventPending = useLatestCallback(props.onDragEventPending);
+  const onDragSelectedEventPending = useLatestCallback(
+    props.onDragSelectedEventPending
+  );
+  const onDragCreateEventPending = useLatestCallback(
+    props.onDragCreateEventPending
+  );
   const onLoad = useLatestCallback(props.onLoad);
 
   const value = useMemo(
@@ -54,6 +61,9 @@ const ActionsProvider: React.FC<PropsWithChildren<ActionsProviderProps>> = ({
       onLongPressBackground,
       onDragCreateEventStart,
       onDragCreateEventEnd,
+      onDragEventPending,
+      onDragSelectedEventPending,
+      onDragCreateEventPending,
       onLoad,
     }),
     [
@@ -71,6 +81,9 @@ const ActionsProvider: React.FC<PropsWithChildren<ActionsProviderProps>> = ({
       onLongPressBackground,
       onDragCreateEventStart,
       onDragCreateEventEnd,
+      onDragEventPending,
+      onDragSelectedEventPending,
+      onDragCreateEventPending,
       onLoad,
     ]
   );

@@ -153,6 +153,18 @@ export interface CalendarKitHandle {
     animated?: boolean,
     scrollType?: 'resource' | 'page'
   ) => void;
+
+  /**
+   * Confirms the pending drag operation when `requireDragConfirmation` is enabled.
+   * Only available when a drag operation is awaiting confirmation.
+   */
+  confirmDrag: () => void;
+
+  /**
+   * Cancels the pending drag operation when `requireDragConfirmation` is enabled.
+   * Only available when a drag operation is awaiting confirmation.
+   */
+  cancelDrag: () => void;
 }
 
 /**
@@ -242,6 +254,33 @@ export interface ActionsProviderProps {
 
   /** Callback when the drag create event is ended */
   onDragCreateEventEnd?: (event: OnCreateEventResponse) => Promise<void> | void;
+
+  /**
+   * Callback when drag operation is pending confirmation (requireDragConfirmation=true).
+   * Use the provided confirm/cancel callbacks or the imperative API to finalize.
+   */
+  onDragEventPending?: (
+    event: OnEventResponse,
+    actions: { confirm: () => void; cancel: () => void }
+  ) => void;
+
+  /**
+   * Callback when selected event drag operation is pending confirmation (requireDragConfirmation=true).
+   * Use the provided confirm/cancel callbacks or the imperative API to finalize.
+   */
+  onDragSelectedEventPending?: (
+    event: SelectedEventType,
+    actions: { confirm: () => void; cancel: () => void }
+  ) => void;
+
+  /**
+   * Callback when drag create operation is pending confirmation (requireDragConfirmation=true).
+   * Use the provided confirm/cancel callbacks or the imperative API to finalize.
+   */
+  onDragCreateEventPending?: (
+    event: OnCreateEventResponse,
+    actions: { confirm: () => void; cancel: () => void }
+  ) => void;
 
   /** Callback when the calendar is loaded */
   onLoad?: () => void;
@@ -478,6 +517,21 @@ export interface CalendarProviderProps extends ActionsProviderProps {
 
   /** Selected event */
   selectedEvent?: SelectedEventType;
+
+  /**
+   * Require manual confirmation after drag operation completes.
+   * When enabled, both the dimmed original and draggable event remain visible
+   * until confirmed or cancelled via onDragEventPending callbacks or imperative API.
+   *
+   * - `true` - all drag modes require confirmation
+   * - `['edit']` - only regular drag-to-edit requires confirmation
+   * - `['create']` - only drag-to-create requires confirmation
+   * - `['selected']` - only drag selected event requires confirmation
+   * - `['edit', 'create']` - both edit and create require confirmation
+   *
+   * Default is `false`
+   */
+  requireDragConfirmation?: boolean | Array<'edit' | 'create' | 'selected'>;
 
   /**
    * Specify the number of pages to render ahead and behind the current page.

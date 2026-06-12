@@ -65,6 +65,7 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
     dragSelectedStartMinutes,
     selectedEvent,
     isDraggingAnim,
+    isPendingConfirmation,
   } = useDragEvent();
   const { triggerDragSelectedEvent } = useDragEventActions();
   const totalResources =
@@ -107,6 +108,15 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
 
   const isDragging = useDerivedValue(() => dragStartUnix.value !== -1);
   const animView = useAnimatedStyle(() => {
+    // When pending confirmation, keep the dimmed version visible
+    if (isPendingConfirmation.value) {
+      return {
+        top: top.value,
+        height: eventHeight.value,
+        opacity: 0.3, // Dimmed but visible
+      };
+    }
+
     return {
       top: top.value,
       height: eventHeight.value,
