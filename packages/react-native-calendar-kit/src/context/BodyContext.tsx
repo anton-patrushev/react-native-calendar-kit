@@ -33,11 +33,14 @@ export interface BodyContextProps {
   timeInterval: number;
   showNowIndicator: boolean;
   showTimeColumnRightLine: boolean;
+  showQuarterHourLines: boolean;
   columnWidth: number;
   isRTL: boolean;
   columns: number;
   calendarData: DataByMode;
   renderHour?: (props: RenderHourProps) => React.ReactNode;
+  renderHalfHour?: (props: RenderHourProps) => React.ReactNode;
+  renderQuarterHour?: (props: RenderHourProps) => React.ReactNode;
   renderCustomOutOfRange?: (props: OutOfRangeProps) => React.ReactNode;
   renderCustomUnavailableHour?: (
     props: UnavailableHourProps & {
@@ -62,6 +65,18 @@ export interface BodyContextProps {
   gridListRef: AnimatedRef<Animated.ScrollView>;
   resourcePerPage: number;
   enableResourceScroll: boolean;
+  dayEndLineStyle?: {
+    borderWidth: number;
+    borderStyle: 'solid' | 'dashed' | 'dotted';
+    borderColor: string;
+  };
+  /** Current zoom scale. Writable — changes during pinch, persists after. */
+  zoomScale: SharedValue<number>;
+  /** Shared counter-scale animated style: { transform: [{ scaleY: 1/zoomScale }] } */
+  counterScaleStyle: { transform: { scaleY: number }[] };
+  /** APP-5422 re-commit trigger: a fresh BodyItem bumps it (while zoomed) to
+   * force the zoom transform to re-commit so Fabric composites the new page. */
+  commitTick: SharedValue<number>;
 }
 
 export const BodyContext = React.createContext<BodyContextProps | undefined>(

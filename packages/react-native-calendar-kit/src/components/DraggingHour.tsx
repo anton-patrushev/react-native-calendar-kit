@@ -23,9 +23,10 @@ const selectTheme = (state: ThemeConfigs) => ({
 
 interface DraggingHourProps {
   renderHour?: (props: RenderHourProps) => React.ReactNode;
+  showEndTime?: boolean;
 }
 
-const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour }) => {
+const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = true }) => {
   const { hourTextColor, hourTextStyle, draggingTextColor } =
     useTheme(selectTheme);
   const fontSize = hourTextStyle?.fontSize ?? 10;
@@ -34,7 +35,7 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour }) => {
     { color: hourTextColor, top: -fontSize / 2 },
     hourTextStyle,
   ]);
-  const { minuteHeight, hourFormat, start, hourWidth, numberOfDays } =
+  const { minuteHeight, hourFormat, start, hourWidth, numberOfDays, counterScaleStyle } =
     useBody();
   const locale = useLocale();
   const { roundedDragStartMinutes, roundedDragDuration } = useDragEvent();
@@ -95,48 +96,56 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour }) => {
           { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
           startAnimStyle,
         ]}>
-        {renderHour ? (
-          renderHour({
-            hourStr: startHourStr,
-            minutes: startMinutes,
-            style,
-          })
-        ) : (
-          <Text style={[style, { color: draggingTextColor }]}>
-            {startHourStr}
-          </Text>
-        )}
+        <Animated.View
+          style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
+          {renderHour ? (
+            renderHour({
+              hourStr: startHourStr,
+              minutes: startMinutes,
+              style,
+            })
+          ) : (
+            <Text style={[style, { color: draggingTextColor }]}>
+              {startHourStr}
+            </Text>
+          )}
+        </Animated.View>
       </Animated.View>
-      <Animated.View
-        pointerEvents="box-none"
-        style={[
-          styles.absolute,
-          { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
-          endAnimStyle,
-        ]}>
-        {renderHour ? (
-          renderHour({
-            hourStr: endHourStr,
-            minutes: endMinutes,
-            style,
-          })
-        ) : (
-          <Text style={[style, { color: draggingTextColor }]}>
-            {endHourStr}
-          </Text>
-        )}
-      </Animated.View>
+      {showEndTime && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={[
+            styles.absolute,
+            { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
+            endAnimStyle,
+          ]}>
+          <Animated.View
+            style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
+            {renderHour ? (
+              renderHour({
+                hourStr: endHourStr,
+                minutes: endMinutes,
+                style,
+              })
+            ) : (
+              <Text style={[style, { color: draggingTextColor }]}>
+                {endHourStr}
+              </Text>
+            )}
+          </Animated.View>
+        </Animated.View>
+      )}
     </>
   );
 };
 
-const DraggingHour: FC<DraggingHourProps> = ({ renderHour }) => {
+const DraggingHour: FC<DraggingHourProps> = ({ renderHour, showEndTime }) => {
   const { isDragging } = useDragEvent();
   if (!isDragging) {
     return null;
   }
 
-  return <DraggingHourInner renderHour={renderHour} />;
+  return <DraggingHourInner renderHour={renderHour} showEndTime={showEndTime} />;
 };
 
 export default DraggingHour;

@@ -10,8 +10,10 @@ import React, {
 import { PixelRatio } from 'react-native';
 import type Animated from 'react-native-reanimated';
 import {
+  runOnJS,
   runOnUI,
   scrollTo,
+  useAnimatedReaction,
   useAnimatedRef,
   useDerivedValue,
   useSharedValue,
@@ -28,7 +30,10 @@ import {
 import ActionsProvider from './context/ActionsProvider';
 import type { CalendarContextProps } from './context/CalendarProvider';
 import CalendarProvider from './context/CalendarProvider';
-import DragEventProvider from './context/DragEventProvider';
+import DragEventProvider, {
+  useDragEventActions,
+} from './context/DragEventProvider';
+import { TapFeedbackProvider } from './context/TapFeedbackContext';
 import type { EventsRef } from './context/EventsProvider';
 import EventsProvider from './context/EventsProvider';
 import HighlightDatesProvider from './context/HighlightDatesProvider';
@@ -67,6 +72,25 @@ import {
   prepareCalendarRange,
 } from './utils/utils';
 
+// Helper component to expose drag actions to parent
+const DragActionsExporter: React.FC<{
+  dragActionsRef: React.MutableRefObject<{
+    confirmDrag: () => void;
+    cancelDrag: () => void;
+  } | null>;
+}> = ({ dragActionsRef }) => {
+  const { confirmDrag, cancelDrag } = useDragEventActions();
+
+  useEffect(() => {
+    dragActionsRef.current = { confirmDrag, cancelDrag };
+    return () => {
+      dragActionsRef.current = null;
+    };
+  }, [confirmDrag, cancelDrag, dragActionsRef]);
+
+  return null;
+};
+
 const CalendarContainer: React.ForwardRefRenderFunction<
   CalendarKitHandle,
   PropsWithChildren<CalendarProviderProps>
@@ -91,7 +115,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     maxTimeIntervalHeight = 124,
     minTimeIntervalHeight = 60,
     allowPinchToZoom = false,
+    onZoomChange,
     initialTimeIntervalHeight = 60,
+    initialZoomScale,
     timeZone: initialTimeZone,
     showWeekNumber = false,
     onChange,
@@ -135,6 +161,14 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     enableResourceScroll = false,
     resourcePerPage = 3,
     resourcePagingEnabled = false,
+    overlappingConfig,
+    requireDragConfirmation = false,
+    onDragEventPending,
+    onDragSelectedEventPending,
+    onDragCreateEventPending,
+    allowDragToOtherResources = true,
+    showTapFeedback = false,
+    tapFeedbackInterval,
   },
   ref
 ) => {
@@ -184,11 +218,12 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     : (initialUseAllDayEvent ?? true);
   const hideWeekDaysCount = hideWeekDays.length;
   const daysToShow = 7 - hideWeekDaysCount;
-  const numberOfDays = isResourceMode
-    ? 1
-    : initialNumberOfDays > daysToShow
-      ? daysToShow
-      : initialNumberOfDays;
+  const numberOfDays =
+    isResourceMode && !enableResourceScroll
+      ? 1
+      : initialNumberOfDays > daysToShow
+        ? daysToShow
+        : initialNumberOfDays;
 
   const isSingleDay = numberOfDays === 1;
   const columns = isSingleDay ? 1 : daysToShow;
@@ -231,16 +266,20 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
   const columnWidth = (calendarLayout.width - hourWidth) / numberOfDays;
 
+  // TimeColumn now renders at body level in every mode (see CalendarBody),
+  // so the grid area always excludes hourWidth.
   const calendarGridWidth = isSingleDay
-    ? isResourceMode
-      ? calendarLayout.width - hourWidth
-      : calendarLayout.width
+    ? calendarLayout.width - hourWidth
     : columnWidth * columns;
 
   const calendarListRef = useRef<CalendarListRef | null>(null);
   const verticalListRef = useAnimatedRef<Animated.ScrollView>();
   const dayBarListRef = useAnimatedRef<Animated.ScrollView>();
   const gridListRef = useAnimatedRef<Animated.ScrollView>();
+  const dragActionsRef = useRef<{
+    confirmDrag: () => void;
+    cancelDrag: () => void;
+  } | null>(null);
   const scrollVisibleHeight = useRef(0);
   const triggerDateChanged = useRef<number | undefined>(undefined);
   const visibleDateRef = useRef<VisibleDateProviderRef>(null);
@@ -276,7 +315,14 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     }
     const nearestIndex = nearestDate.index;
     if (isSingleDay || scrollByDay) {
-      const colWidth = isSingleDay ? calendarGridWidth : columnWidth;
+      let colWidth = isSingleDay ? calendarGridWidth : columnWidth;
+
+      // For resource mode with enableResourceScroll, calculate day width
+      if (isResourceMode && enableResourceScroll && resources) {
+        const resourceWidth = calendarGridWidth / resourcePerPage;
+        colWidth = resources.length * resourceWidth;
+      }
+
       return nearestIndex * colWidth;
     }
 
@@ -290,20 +336,40 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     isSingleDay,
     scrollByDay,
     visibleDateUnix,
+    isResourceMode,
+    enableResourceScroll,
+    resources,
+    resourcePerPage,
   ]);
 
   const offsetY = useSharedValue(0);
-  const offsetX = useSharedValue(
-    isResourceMode && enableResourceScroll ? 0 : initialOffset
-  );
+  const offsetX = useSharedValue(initialOffset);
   const linkedScrollGroup = useLinkedScrollGroup(offsetX);
   const scrollVisibleHeightAnim = useSharedValue(0);
   const timeIntervalHeight = useSharedValue(initialTimeIntervalHeight);
+  const minZoomScale = minTimeIntervalHeight / initialTimeIntervalHeight;
+  const maxZoomScale = maxTimeIntervalHeight / initialTimeIntervalHeight;
+  // zoomScale is the ONLY SharedValue that changes during pinch.
+  // timeIntervalHeight stays constant at initialTimeIntervalHeight.
+  const zoomScale = useSharedValue(
+    initialZoomScale
+      ? clampValues(initialZoomScale, minZoomScale, maxZoomScale)
+      : 1.0
+  );
+  // Owned here (instead of inside usePinchToZoom) so the onZoomChange
+  // reaction below can gate emissions on whether a pinch is in progress.
+  const isPinching = useSharedValue(false);
+  // True while the post-pinch overscroll spring is settling — kept separate
+  // from isPinching so the gesture itself can release while the spring is
+  // still animating. The reaction below treats `isPinching || isSettling`
+  // as "still interactive" and only emits onZoomChange once both are false.
+  const isSettling = useSharedValue(false);
   const eventsRef = useRef<EventsRef>(null);
 
   const extraHeight = spaceFromTop + spaceFromBottom;
   const maxTimelineHeight = totalSlots * maxTimeIntervalHeight + extraHeight;
 
+  // minuteHeight, timelineHeight, startOffset are constant (derived from constant TIH)
   const minuteHeight = useDerivedValue(
     () => timeIntervalHeight.value / timeInterval
   );
@@ -311,6 +377,46 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     () => totalSlots * timeIntervalHeight.value + 1 + extraHeight
   );
   const startOffset = useDerivedValue(() => start * minuteHeight.value);
+
+  // Emit zoom percentage changes via callback.
+  //
+  // Emissions are deferred to gesture end: during a pinch this would fire
+  // ~once per integer percent (≈100 callbacks/sec), and each call lands on
+  // the JS thread where consumers typically do `setState` → React commit
+  // mid-pinch → visible shake. We instead emit once when `isPinching`
+  // transitions from `true` to `false` (gesture released) with the final
+  // zoom percent. Programmatic / spring-overshoot percent changes that
+  // happen outside a pinch still emit normally.
+  //
+  // Clamp zoomScale to [min, max] before computing percent so that
+  // rubber-band / spring overshoot doesn't report out-of-range values.
+  useAnimatedReaction(
+    () => {
+      const range = maxZoomScale - minZoomScale;
+      const clamped = clampValues(zoomScale.value, minZoomScale, maxZoomScale);
+      const zoomPercent =
+        range === 0 ? 0 : Math.round(((clamped - minZoomScale) / range) * 100);
+      // "Interacting" covers both the live pinch AND the post-release
+      // settle spring. The reaction only fires onZoomChange once this flag
+      // transitions from true to false (i.e. settle complete) or when
+      // zoomPercent changes outside any interaction (programmatic zoom).
+      const interacting = isPinching.value || isSettling.value;
+      return { interacting, zoomPercent };
+    },
+    (current, previous) => {
+      if (!onZoomChange || !current) return;
+      const justEndedInteraction =
+        !!previous && previous.interacting && !current.interacting;
+      const percentChangedWhileIdle =
+        !!previous &&
+        !current.interacting &&
+        !previous.interacting &&
+        previous.zoomPercent !== current.zoomPercent;
+      if (justEndedInteraction || percentChangedWhileIdle) {
+        runOnJS(onZoomChange)(current.zoomPercent);
+      }
+    }
+  );
 
   const goToDate = useLatestCallback((props?: GoToDateOptions) => {
     const date = parseDateTime(props?.date, { zone: timeZone });
@@ -332,7 +438,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         offset = pageIndex * (columnWidth * columns);
       }
 
-      if (isResourceMode && enableResourceScroll) {
+      if (isResourceMode && enableResourceScroll && resources) {
         visibleDateUnix.current = nearestUnix;
         visibleDateUnixAnim.value = nearestUnix;
         visibleDateRef.current?.updateVisibleDate(nearestUnix);
@@ -340,6 +446,20 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         const newDate = dateTimeToISOString(dateObj);
         onDateChanged?.(newDate);
         onChange?.(newDate);
+
+        // Calculate the scroll offset for the date
+        const resourceWidth = calendarGridWidth / resourcePerPage;
+        const dayOffset = visibleDayIndex * resources.length * resourceWidth;
+
+        linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
+        const animatedDate =
+          props?.animatedDate !== undefined ? props.animatedDate : true;
+
+        runOnUI(() => {
+          offsetX.value = dayOffset;
+          scrollTo(dayBarListRef, dayOffset, 0, animatedDate);
+          scrollTo(gridListRef, dayOffset, 0, animatedDate);
+        })();
       } else {
         const isScrollable = calendarListRef.current?.isScrollable(
           offset,
@@ -361,7 +481,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
     if (props?.hourScroll) {
       const minutes = date.hour * 60 + date.minute;
-      const position = minutes * minuteHeight.value - startOffset.value;
+      const position =
+        (minutes * minuteHeight.value - startOffset.value) * zoomScale.value;
       const scrollOffset = scrollVisibleHeight.current / 2;
       const animatedHour =
         props?.animatedHour !== undefined ? props.animatedHour : true;
@@ -377,7 +498,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       if (timeInMinutes < start || timeInMinutes > end) {
         return;
       }
-      const position = (timeInMinutes - start) * minuteHeight.value;
+      const position =
+        (timeInMinutes - start) * minuteHeight.value * zoomScale.value;
       runOnUI(() => {
         scrollTo(verticalListRef, 0, position, animated);
       })();
@@ -408,7 +530,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       }
 
       const nextDateUnix = visibleDatesArray[nextVisibleDayIndex];
-      if (isResourceMode && enableResourceScroll && nextDateUnix) {
+      if (isResourceMode && enableResourceScroll && nextDateUnix && resources) {
         visibleDateUnix.current = nextDateUnix;
         visibleDateUnixAnim.value = nextDateUnix;
         visibleDateRef.current?.updateVisibleDate(nextDateUnix);
@@ -416,6 +538,18 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         const newDate = dateTimeToISOString(dateObj);
         onDateChanged?.(newDate);
         onChange?.(newDate);
+
+        // Calculate the scroll offset for the new day
+        const resourceWidth = calendarGridWidth / resourcePerPage;
+        const dayOffset =
+          nextVisibleDayIndex * resources.length * resourceWidth;
+
+        linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
+        runOnUI(() => {
+          offsetX.value = dayOffset;
+          scrollTo(dayBarListRef, dayOffset, 0, animated);
+          scrollTo(gridListRef, dayOffset, 0, animated);
+        })();
         return;
       }
 
@@ -466,7 +600,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         numberOfDays
       );
       const nextDateUnix = visibleDatesArray[nextVisibleDayIndex];
-      if (isResourceMode && enableResourceScroll && nextDateUnix) {
+      if (isResourceMode && enableResourceScroll && nextDateUnix && resources) {
         visibleDateUnix.current = nextDateUnix;
         visibleDateUnixAnim.value = nextDateUnix;
         visibleDateRef.current?.updateVisibleDate(nextDateUnix);
@@ -474,6 +608,18 @@ const CalendarContainer: React.ForwardRefRenderFunction<
         const newDate = dateTimeToISOString(dateObj);
         onDateChanged?.(newDate);
         onChange?.(newDate);
+
+        // Calculate the scroll offset for the new day
+        const resourceWidth = calendarGridWidth / resourcePerPage;
+        const dayOffset =
+          nextVisibleDayIndex * resources.length * resourceWidth;
+
+        linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
+        runOnUI(() => {
+          offsetX.value = dayOffset;
+          scrollTo(dayBarListRef, dayOffset, 0, animated);
+          scrollTo(gridListRef, dayOffset, 0, animated);
+        })();
         return;
       }
 
@@ -494,20 +640,23 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   const zoom = useLatestCallback(
     (props?: { scale?: number; height?: number }) => {
       runOnUI(() => {
-        let newHeight = props?.height ?? initialTimeIntervalHeight;
-        if (props?.scale) {
-          newHeight = timeIntervalHeight.value * props.scale;
+        let targetScale = 1.0;
+        if (props?.height) {
+          targetScale = props.height / initialTimeIntervalHeight;
+        } else if (props?.scale) {
+          targetScale = zoomScale.value * props.scale;
         }
-        const clampedHeight = clampValues(
-          newHeight,
-          minTimeIntervalHeight,
-          maxTimeIntervalHeight
+        const clampedScale = clampValues(
+          targetScale,
+          minZoomScale,
+          maxZoomScale
         );
-        const pinchYNormalized = offsetY.value / timeIntervalHeight.value;
-        const pinchYScale = clampedHeight * pinchYNormalized;
-        const y = pinchYScale;
-        timeIntervalHeight.value = withTiming(clampedHeight);
-        scrollTo(verticalListRef, 0, y, true);
+        const oldScale = zoomScale.value;
+        const pinchYNormalized =
+          offsetY.value / (timelineHeight.value * oldScale);
+        zoomScale.value = withTiming(clampedScale);
+        const newY = pinchYNormalized * timelineHeight.value * clampedScale;
+        scrollTo(verticalListRef, 0, newY, true);
       })();
     }
   );
@@ -540,7 +689,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       if (!dateUnixByIndex) {
         return;
       }
-      const minutes = Math.floor(position.y / minuteHeight.value) + start;
+      const minutes =
+        Math.floor(position.y / (minuteHeight.value * zoomScale.value)) + start;
       return parseDateTime(dateUnixByIndex).plus({ minutes });
     }
   );
@@ -591,13 +741,14 @@ const CalendarContainer: React.ForwardRefRenderFunction<
   );
 
   const getSizeByDuration = useLatestCallback((duration: number) => {
-    const height = duration * minuteHeight.value;
+    const height = duration * minuteHeight.value * zoomScale.value;
     return { width: columnWidth, height };
   });
 
   const getVisibleStart = useLatestCallback(() => {
     const currentDate = forceUpdateZone(visibleDateUnix.current, timeZone);
-    const startMinutes = offsetY.value / minuteHeight.value - start;
+    const startMinutes =
+      offsetY.value / (minuteHeight.value * zoomScale.value) - start;
     currentDate.plus({ minutes: startMinutes });
     return dateTimeToISOString(currentDate);
   });
@@ -638,14 +789,19 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
   const goToNextResource = useLatestCallback(
     (animated?: boolean, resourceScrollType?: 'resource' | 'page') => {
-      const resourceWidth = columnWidth / resourcePerPage;
+      if (!isResourceMode || !enableResourceScroll) {
+        console.warn('Only available for resource mode (enableResourceScroll)');
+        return;
+      }
+
+      const resourceWidth = calendarGridWidth / resourcePerPage;
       let nextOffset = 0;
       let mode = resourcePagingEnabled ? 'page' : 'resource';
       if (resourceScrollType) {
         mode = resourceScrollType;
       }
       if (mode === 'page') {
-        nextOffset = offsetX.value + columnWidth;
+        nextOffset = offsetX.value + calendarGridWidth;
       } else {
         nextOffset = offsetX.value + resourceWidth;
       }
@@ -667,19 +823,24 @@ const CalendarContainer: React.ForwardRefRenderFunction<
 
   const goToPrevResource = useLatestCallback(
     (animated?: boolean, resourceScrollType?: 'resource' | 'page') => {
-      const resourceWidth = columnWidth / resourcePerPage;
+      if (!isResourceMode || !enableResourceScroll) {
+        console.warn('Only available for resource mode (enableResourceScroll)');
+        return;
+      }
+
+      const resourceWidth = calendarGridWidth / resourcePerPage;
       let nextOffset = 0;
       let mode = resourcePagingEnabled ? 'page' : 'resource';
       if (resourceScrollType) {
         mode = resourceScrollType;
       }
       if (mode === 'page') {
-        nextOffset = offsetX.value - columnWidth;
+        nextOffset = offsetX.value - calendarGridWidth;
       } else {
         nextOffset = offsetX.value - resourceWidth;
       }
       if (nextOffset < 0) {
-        return;
+        nextOffset = 0;
       }
 
       linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
@@ -691,6 +852,18 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       })();
     }
   );
+
+  const confirmDrag = useLatestCallback(() => {
+    if (dragActionsRef.current?.confirmDrag) {
+      dragActionsRef.current.confirmDrag();
+    }
+  });
+
+  const cancelDrag = useLatestCallback(() => {
+    if (dragActionsRef.current?.cancelDrag) {
+      dragActionsRef.current.cancelDrag();
+    }
+  });
 
   const calendarMethods = useMemo(
     () => ({
@@ -708,6 +881,8 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       goToResource,
       goToNextResource,
       goToPrevResource,
+      confirmDrag,
+      cancelDrag,
     }),
     [
       getDateStringByOffset,
@@ -724,18 +899,140 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       goToResource,
       goToNextResource,
       goToPrevResource,
+      confirmDrag,
+      cancelDrag,
     ]
   );
 
   useImperativeHandle(ref, () => calendarMethods, [calendarMethods]);
 
   useEffect(() => {
-    if (enableResourceScroll && isResourceMode) {
-      offsetX.value = 0;
-    } else {
-      offsetX.value = initialOffset;
+    offsetX.value = initialOffset;
+  }, [initialOffset, offsetX]);
+
+  const dateResourceItems = useMemo(() => {
+    if (!enableResourceScroll || !isResourceMode || !resources) {
+      return undefined;
     }
-  }, [enableResourceScroll, initialOffset, isResourceMode, offsetX]);
+
+    const visibleDatesArray = calendarData.visibleDatesArray;
+    const items = visibleDatesArray.flatMap((date) =>
+      resources.map((resource) => ({ date, resource }))
+    );
+
+    return items;
+  }, [enableResourceScroll, isResourceMode, resources, calendarData]);
+
+  const daySnapOffsets = useMemo(() => {
+    if (!enableResourceScroll || !isResourceMode || !resources) {
+      return undefined;
+    }
+
+    const visibleDatesArray = calendarData.visibleDatesArray;
+    const resourceWidth = calendarGridWidth / resourcePerPage;
+    const resourcesCount = resources.length;
+
+    const offsets: number[] = [];
+
+    visibleDatesArray.forEach((_, dayIndex) => {
+      const dayStartOffset = dayIndex * resourcesCount * resourceWidth;
+
+      if (resourcesCount <= resourcePerPage) {
+        // If all resources fit in one page, only snap at the start of the day
+        offsets.push(dayStartOffset);
+      } else {
+        // Snap at every resource position that keeps all visible resources within the current day
+        // Last valid snap position is where the last resource of the day is at the right edge
+        const maxResourceStartIndex = resourcesCount - resourcePerPage;
+
+        for (let i = 0; i <= maxResourceStartIndex; i++) {
+          offsets.push(dayStartOffset + i * resourceWidth);
+        }
+      }
+    });
+
+    return offsets;
+  }, [
+    enableResourceScroll,
+    isResourceMode,
+    resources,
+    calendarData,
+    calendarGridWidth,
+    resourcePerPage,
+  ]);
+
+  // Track the previous resource-mode scroll offset so we can pick the visible
+  // date in the direction of travel (see handleResourceScrollOffsetChange).
+  // Without this, backward scrolls lag because we always picked the latest
+  // visible date, which stayed pinned to the day being scrolled away from.
+  const previousResourceScrollOffsetRef = useRef<number>(0);
+
+  const handleResourceScrollOffsetChange = useLatestCallback(
+    (scrollOffset: number) => {
+      if (
+        !enableResourceScroll ||
+        !isResourceMode ||
+        !resources ||
+        !dateResourceItems
+      ) {
+        return;
+      }
+
+      const resourceWidth = calendarGridWidth / resourcePerPage;
+      const viewportStart = scrollOffset;
+      const viewportEnd = scrollOffset + calendarGridWidth;
+
+      // Calculate which resource items are visible
+      // Use Math.floor for start, but subtract 0.5 from end to avoid counting items at exact boundary
+      const startItemIndex = Math.floor(viewportStart / resourceWidth);
+      const endItemIndex = Math.floor((viewportEnd - 0.5) / resourceWidth);
+
+      // Count visible resources per day
+      const dayCounts = new Map<number, number>();
+      for (
+        let i = startItemIndex;
+        i <= Math.min(endItemIndex, dateResourceItems.length - 1);
+        i++
+      ) {
+        const item = dateResourceItems[i];
+        if (item) {
+          const count = dayCounts.get(item.date) || 0;
+          dayCounts.set(item.date, count + 1);
+        }
+      }
+
+      // Pick the visible date in the direction of travel:
+      //   forward  (offset increasing) → latest visible date
+      //   backward (offset decreasing) → earliest visible date
+      // Picking unconditionally-latest (the original behaviour) means a
+      // backward scroll keeps reporting the day we're moving AWAY from until
+      // it fully exits the viewport, which makes consumers like a custom
+      // header lag visibly on backward swipes.
+      const scrollingBackward =
+        scrollOffset < previousResourceScrollOffsetRef.current;
+      previousResourceScrollOffsetRef.current = scrollOffset;
+      const visibleDates = Array.from(dayCounts.keys()).sort((a, b) => a - b);
+      const activeDayUnix =
+        visibleDates.length === 0
+          ? visibleDateUnix.current
+          : scrollingBackward
+          ? visibleDates[0]
+          : visibleDates[visibleDates.length - 1];
+
+      if (activeDayUnix && activeDayUnix !== visibleDateUnix.current) {
+        hapticService.selection();
+        visibleDateUnix.current = activeDayUnix;
+        visibleDateUnixAnim.value = activeDayUnix;
+        visibleDateRef.current?.updateVisibleDate(activeDayUnix);
+
+        const dateObj = forceUpdateZone(activeDayUnix, timeZone);
+        const newDate = dateTimeToISOString(dateObj);
+
+        onDateChanged?.(newDate);
+        onChange?.(newDate);
+      }
+    }
+  );
 
   const snapToInterval =
     numberOfDays > 1 && scrollByDay && !isResourceMode
@@ -798,6 +1095,15 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       resourcePerPage,
       resourcePagingEnabled,
       linkedScrollGroup,
+      dateResourceItems,
+      resources,
+      daySnapOffsets,
+      handleResourceScrollOffsetChange,
+      zoomScale,
+      minZoomScale,
+      maxZoomScale,
+      isPinching,
+      isSettling,
     }),
     [
       calendarLayout,
@@ -852,6 +1158,15 @@ const CalendarContainer: React.ForwardRefRenderFunction<
       resourcePerPage,
       resourcePagingEnabled,
       linkedScrollGroup,
+      dateResourceItems,
+      resources,
+      daySnapOffsets,
+      handleResourceScrollOffsetChange,
+      zoomScale,
+      minZoomScale,
+      maxZoomScale,
+      isPinching,
+      isSettling,
     ]
   );
 
@@ -876,6 +1191,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     onDragSelectedEventEnd,
     onDragCreateEventStart,
     onDragCreateEventEnd,
+    onDragEventPending,
+    onDragSelectedEventPending,
+    onDragCreateEventPending,
     onLoad: _onLoad,
     onLongPressBackground,
   };
@@ -909,7 +1227,9 @@ const CalendarContainer: React.ForwardRefRenderFunction<
                           hideWeekDays={hideWeekDays}
                           overlapType={overlapType}
                           resources={resources}
-                          minStartDifference={minStartDifference}>
+                          minStartDifference={minStartDifference}
+                          overlappingConfig={overlappingConfig}
+                          columnWidth={columnWidth}>
                           <DragEventProvider
                             dragStep={dragStep}
                             allowDragToEdit={allowDragToEdit}
@@ -917,8 +1237,15 @@ const CalendarContainer: React.ForwardRefRenderFunction<
                             allowDragToCreate={allowDragToCreate}
                             defaultDuration={defaultDuration}
                             resources={resources}
-                            hapticService={hapticService}>
-                            {children}
+                            hapticService={hapticService}
+                            requireDragConfirmation={requireDragConfirmation}
+                            allowDragToOtherResources={allowDragToOtherResources}>
+                            <DragActionsExporter dragActionsRef={dragActionsRef} />
+                            <TapFeedbackProvider
+                              enabled={showTapFeedback}
+                              snapInterval={tapFeedbackInterval}>
+                              {children}
+                            </TapFeedbackProvider>
                           </DragEventProvider>
                         </EventsProvider>
                       </UnavailableHoursProvider>

@@ -7,6 +7,8 @@ import type HapticService from '../service/HapticService';
 import type { DataByMode } from '../utils/utils';
 import { CalendarListRef } from '../service/CalendarList';
 import { LinkedScrollGroup } from '../hooks/useLinkedScrollGroup';
+import { DateResourceItem } from '../components/Resource/ResourceListView';
+import type { ResourceItem } from '../types';
 
 export interface CalendarContextProps {
   calendarData: DataByMode;
@@ -63,6 +65,34 @@ export interface CalendarContextProps {
   resourcePerPage: number;
   resourcePagingEnabled: boolean;
   linkedScrollGroup: LinkedScrollGroup;
+  dateResourceItems?: DateResourceItem[];
+  /**
+   * The resources prop, threaded through context so consumers (e.g. the
+   * header) read a value in step with the `resources` prop instead of the
+   * EventsProvider store, which is written in an effect and lags by a commit.
+   */
+  resources?: ResourceItem[];
+  daySnapOffsets?: number[];
+  handleResourceScrollOffsetChange?: (offset: number) => void;
+  /** Current zoom scale. Writable — changes during pinch, persists after. */
+  zoomScale: SharedValue<number>;
+  /** Minimum zoom scale: minTimeIntervalHeight / initialTimeIntervalHeight. */
+  minZoomScale: number;
+  /** Maximum zoom scale: maxTimeIntervalHeight / initialTimeIntervalHeight. */
+  maxZoomScale: number;
+  /**
+   * `true` while a pinch gesture is in progress. Written by usePinchToZoom,
+   * read by CalendarContainer (to gate `onZoomChange` emissions) and by
+   * CalendarBody (to skip vertical scroll-offset overwrites on Android).
+   */
+  isPinching: SharedValue<boolean>;
+  /**
+   * `true` while the post-pinch overscroll spring is animating. Written by
+   * usePinchToZoom around the `withSpring(...)` call. The onZoomChange
+   * reaction in CalendarContainer waits for BOTH `isPinching` and
+   * `isSettling` to be false before emitting.
+   */
+  isSettling: SharedValue<boolean>;
 }
 
 export const CalendarContext = React.createContext<

@@ -7,7 +7,10 @@ import {
   Pressable,
   type GestureResponderEvent,
 } from 'react-native';
-import { useDerivedValue } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useDerivedValue,
+} from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY } from '../constants';
 import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -44,6 +47,8 @@ const EventItem: FC<EventItemProps> = ({
       return {
         eventContainerStyle: state.eventContainerStyle,
         eventTitleStyle: state.eventTitleStyle,
+        overlapEventBorderColor: state.overlapEventBorderColor,
+        overlapEventBorderWidth: state.overlapEventBorderWidth,
       };
     }, [])
   );
@@ -57,6 +62,8 @@ const EventItem: FC<EventItemProps> = ({
     columnWidth,
     resourcePerPage,
     enableResourceScroll,
+    zoomScale,
+    counterScaleStyle,
   } = useBody();
   const { _internal, ...event } = eventInput;
   const timeRange = end - start;
@@ -70,6 +77,8 @@ const EventItem: FC<EventItemProps> = ({
     widthPercentage,
     xOffsetPercentage,
     resourceIndex,
+    zIndex,
+    stackLevel,
   } = _internal;
 
   const data = useMemo(() => {
@@ -81,30 +90,46 @@ const EventItem: FC<EventItemProps> = ({
       newStart = 0;
     }
 
-    let diffDays = Math.floor(
-      (eventStartUnix - startUnix) / MILLISECONDS_IN_DAY
-    );
+    // Get the event's day start (not the event time, but the start of that day)
+    const eventDayStart = parseDateTime(eventStartUnix)
+      .startOf('day')
+      .toMillis();
 
-    if (eventStartUnix < startUnix) {
-      for (
-        let dayUnix = eventStartUnix;
-        dayUnix < startUnix;
-        dayUnix = parseDateTime(dayUnix).plus({ days: 1 }).toMillis()
-      ) {
-        const dayStartUnix = parseDateTime(dayUnix).startOf('day').toMillis();
-        if (!visibleDates[dayStartUnix]) {
-          diffDays++;
-        }
-      }
+    // Use the diffDays from visibleDates if available, otherwise calculate it
+    let diffDays = 0;
+    if (visibleDates[eventDayStart]) {
+      diffDays = visibleDates[eventDayStart].diffDays;
     } else {
-      for (
-        let dayUnix = startUnix;
-        dayUnix < eventStartUnix;
-        dayUnix = parseDateTime(dayUnix).plus({ days: 1 }).toMillis()
-      ) {
-        const dayStartUnix = parseDateTime(dayUnix).startOf('day').toMillis();
-        if (!visibleDates[dayStartUnix]) {
-          diffDays--;
+      // Fallback: calculate based on day difference
+      const referenceDayStart = parseDateTime(startUnix)
+        .startOf('day')
+        .toMillis();
+      diffDays = Math.floor(
+        (eventDayStart - referenceDayStart) / MILLISECONDS_IN_DAY
+      );
+
+      // Adjust for hidden days
+      if (eventStartUnix < startUnix) {
+        for (
+          let dayUnix = eventStartUnix;
+          dayUnix < startUnix;
+          dayUnix = parseDateTime(dayUnix).plus({ days: 1 }).toMillis()
+        ) {
+          const dayStartUnix = parseDateTime(dayUnix).startOf('day').toMillis();
+          if (!visibleDates[dayStartUnix]) {
+            diffDays++;
+          }
+        }
+      } else {
+        for (
+          let dayUnix = startUnix;
+          dayUnix < eventStartUnix;
+          dayUnix = parseDateTime(dayUnix).plus({ days: 1 }).toMillis()
+        ) {
+          const dayStartUnix = parseDateTime(dayUnix).startOf('day').toMillis();
+          if (!visibleDates[dayStartUnix]) {
+            diffDays--;
+          }
         }
       }
     }
@@ -124,6 +149,12 @@ const EventItem: FC<EventItemProps> = ({
     visibleDates,
   ]);
 
+  // Calculate childColumns based on mode:
+  // - Dual-axis resource mode: totalResources === 1, use resourcePerPage
+  // - Grouped resource mode: totalResources > 1, use resourcePerPage
+  // - Regular resource mode (no scroll): use totalResources
+  // - Week view (no resources): use 1 (diffDays handles day positioning)
+  const isDualAxisMode = enableResourceScroll && totalResources === 1;
   const childColumns = enableResourceScroll
     ? resourcePerPage
     : totalResources && totalResources > 0
@@ -161,17 +192,26 @@ const EventItem: FC<EventItemProps> = ({
   const eventWidth = widthPercent * availableWidth;
   const eventPosX = useMemo(() => {
     const colWidth = columnWidth / childColumns;
-    const startOffset = resourceIndex
-      ? (enableResourceScroll
+
+    // In dual-axis mode, each container has only 1 resource, so position is always 0
+    // In grouped mode, calculate visual column position
+    let startOffset = 0;
+    if (!isDualAxisMode) {
+      const visualColumn =
+        resourceIndex !== undefined && enableResourceScroll
           ? resourceIndex % resourcePerPage
-          : resourceIndex) * colWidth
-      : 0;
+          : resourceIndex || 0;
+      startOffset = visualColumn * colWidth;
+    }
+
     let left = data.diffDays * colWidth + startOffset;
+
     if (xOffsetPercentage) {
       left += availableWidth * (xOffsetPercentage / 100);
     } else if (columnSpan && index) {
       left += (eventWidth + overlapEventsSpacing) * (index / columnSpan);
     }
+
     return left;
   }, [
     availableWidth,
@@ -182,6 +222,7 @@ const EventItem: FC<EventItemProps> = ({
     enableResourceScroll,
     eventWidth,
     index,
+    isDualAxisMode,
     overlapEventsSpacing,
     resourceIndex,
     resourcePerPage,
@@ -195,6 +236,9 @@ const EventItem: FC<EventItemProps> = ({
   };
 
   const _onLongPressEvent = (resEvent: GestureResponderEvent) => {
+    if (eventInput.draggable === false) {
+      return;
+    }
     onLongPressEvent!(eventInput, resEvent);
   };
 
@@ -202,49 +246,110 @@ const EventItem: FC<EventItemProps> = ({
 
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
 
+  // Counter the parent scaleY's effect on borderRadius. The base radius
+  // honours the consumer's `theme.eventContainerStyle.borderRadius` when
+  // provided (so theming flows through) and falls back to the library
+  // default of 2. Layout radius shrinks as zoom grows so the vertical
+  // visual radius stays at the base value. RN can't express asymmetric
+  // X/Y radii, so the horizontal radius flattens slightly at high zoom.
+  const baseBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? ((theme.eventContainerStyle as { borderRadius: number }).borderRadius)
+      : 2;
+  // Static base radius — no per-event animated counter-scale. At high
+  // zoom the corner curve elongates slightly along Y (RN can't express
+  // asymmetric X/Y radii under scaleY), which is a tiny visual artifact
+  // accepted in exchange for eliminating N per-event transform commits
+  // per pinch frame.
+  const borderRadiusStyle = { borderRadius: baseBorderRadius };
+
+  // Compute overlap border style
+  const overlapBorderStyle = useMemo(() => {
+    // Show border only for stacked events (stackLevel > 0)
+    const isStacked = (stackLevel ?? 0) > 0;
+    if (!isStacked) {
+      return undefined;
+    }
+
+    const borderColor =
+      theme.overlapEventBorderColor === null
+        ? undefined
+        : theme.overlapEventBorderColor ?? '#FFF';
+
+    const borderWidth =
+      theme.overlapEventBorderWidth !== undefined
+        ? theme.overlapEventBorderWidth
+        : 1;
+
+    if (borderColor === undefined || borderWidth === 0) {
+      return undefined;
+    }
+
+    return {
+      borderWidth,
+      borderColor,
+    };
+  }, [
+    stackLevel,
+    theme.overlapEventBorderColor,
+    theme.overlapEventBorderWidth,
+  ]);
+
   return (
     <View
       style={[
         styles.container,
         {
           width: eventWidth,
-          left: eventPosX + 1,
+          left: eventPosX,
           height: `${((data.totalDuration - 1) / timeRange) * 100}%`,
           top: `${((data.startMinutes + 1) / timeRange) * 100}%`,
+          zIndex,
         },
       ]}>
       <Pressable
-        style={(state) => [
-          StyleSheet.absoluteFill,
-          { opacity: state.pressed ? 0.6 : 1 },
-        ]}
+        style={StyleSheet.absoluteFill}
         disabled={!onPressEvent && !onLongPressEvent}
         onPress={onPressEvent ? _onPressEvent : undefined}
         onLongPress={onLongPressEvent ? _onLongPressEvent : undefined}>
-        <View
-          style={[
-            styles.contentContainer,
-            !!xOffsetPercentage && styles.overlapEvent,
-            { backgroundColor: event.color },
-            theme.eventContainerStyle,
-            { opacity },
-          ]}>
-          {renderEvent ? (
-            renderEvent(eventInput, {
-              width: eventWidthAnim,
-              height: eventHeight,
-            })
-          ) : (
-            <Text
-              style={[
-                styles.title,
-                theme.eventTitleStyle,
-                { color: event.titleColor },
-              ]}>
-              {event.title}
-            </Text>
-          )}
-        </View>
+        {({ pressed }) => (
+          <Animated.View
+            style={[
+              styles.contentContainer,
+              { backgroundColor: event.color },
+              theme.eventContainerStyle,
+              overlapBorderStyle,
+              { opacity },
+              borderRadiusStyle,
+            ]}>
+            {renderEvent ? (
+              renderEvent(eventInput, {
+                width: eventWidthAnim,
+                height: eventHeight,
+                zoomScale,
+              })
+            ) : (
+              // transformOrigin: 'top' anchors the counter-scaled title to
+              // the top edge of the event block. Default center origin
+              // shrinks the title around its own center, so at zoom > 1 the
+              // title drifts ~titleHeight*(z-1)/2 below the block top.
+              <Animated.View
+                style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
+                <Text
+                  style={[
+                    styles.title,
+                    theme.eventTitleStyle,
+                    { color: event.titleColor },
+                  ]}>
+                  {event.title}
+                </Text>
+              </Animated.View>
+            )}
+            {/* Dark overlay for pressed state - darkens card without transparency */}
+            {pressed && <View style={styles.pressedOverlay} />}
+          </Animated.View>
+        )}
       </Pressable>
     </View>
   );
@@ -271,5 +376,9 @@ const styles = StyleSheet.create({
     height: '100%',
     overflow: 'hidden',
   },
-  overlapEvent: { borderWidth: 1, borderColor: '#FFF' },
+  pressedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 2,
+  },
 });

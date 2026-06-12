@@ -23,6 +23,7 @@ const CalendarKit: React.ForwardRefRenderFunction<
     showNowIndicator,
     showTimeColumnRightLine,
     dayBarHeight,
+    dayBarScrollEnabled,
     renderCustomOutOfRange,
     renderCustomUnavailableHour,
     renderEvent,
@@ -39,11 +40,13 @@ const CalendarKit: React.ForwardRefRenderFunction<
     eventInitialMinutes,
     eventMinMinutes,
     renderCustomHorizontalLine,
+    showDraggingEndTime,
     ...rest
   } = props;
 
   const dayBarProps: CalendarHeaderProps = {
     dayBarHeight,
+    dayBarScrollEnabled,
     renderHeaderItem,
     renderExpandIcon,
     renderEvent,
@@ -68,6 +71,7 @@ const CalendarKit: React.ForwardRefRenderFunction<
     renderDraggingEvent,
     NowIndicatorComponent,
     renderCustomHorizontalLine,
+    showDraggingEndTime,
   };
 
   return (

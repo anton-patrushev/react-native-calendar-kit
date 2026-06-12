@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -10,7 +10,6 @@ import type { DraggableEventProps } from './DraggableEvent';
 import DraggableEvent from './DraggableEvent';
 import Events from './Events';
 import LoadingOverlay from './Loading/Overlay';
-import NowIndicator from './NowIndicator';
 import TimelineBoard from './TimelineBoard';
 import { ResourceItem } from '../types';
 
@@ -33,30 +32,42 @@ const BodyItem = ({
     spaceFromTop,
     timelineHeight,
     spaceFromBottom,
-    hourWidth,
-    numberOfDays,
     calendarData,
     columns,
+    zoomScale,
+    commitTick,
   } = useBody();
+
+  // APP-5422: a page mounted fresh while zoomed can be left un-composited by
+  // Fabric (blank until a manual pinch). Bump commitTick to force the zoom
+  // transform to re-commit. Gated on zoom≠1 (no transform to miss at identity).
+  useEffect(() => {
+    if (Math.abs(zoomScale.value - 1) > 1e-3) {
+      commitTick.value += 1;
+    }
+    // mount-only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visibleDates = useMemo(() => {
     const data: Record<string, { diffDays: number; unix: number }> = {};
-    let diffDays = 1;
     for (let i = 0; i < columns; i++) {
       const currentUnix = calendarData.visibleDatesArray[pageIndex + i];
       if (currentUnix) {
         data[currentUnix] = {
           unix: currentUnix,
-          diffDays,
+          diffDays: i,  // Use i directly: 0 for first column, 1 for second, etc.
         };
-        diffDays += 1;
       }
     }
 
     return data;
   }, [calendarData.visibleDatesArray, columns, pageIndex]);
 
-  const leftSpacing = numberOfDays === 1 ? hourWidth : 0;
+  // TimeColumn now lives at body level in every mode, so day cells no
+  // longer carry it — events content starts at x=0 of the cell regardless
+  // of single-day vs multi-day.
+  const leftSpacing = 0;
 
   const height = useDerivedValue(() => {
     return timelineHeight.value - spaceFromTop - spaceFromBottom;
@@ -89,7 +100,6 @@ const BodyItem = ({
           visibleDates={visibleDates}
           resources={resources}
         />
-        <NowIndicator visibleDates={visibleDates} />
         <DraggableEvent
           startUnix={startUnix}
           visibleDates={visibleDates}

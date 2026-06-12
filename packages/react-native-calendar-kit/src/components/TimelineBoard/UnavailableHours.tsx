@@ -103,8 +103,9 @@ const UnavailableColumns = memo(
     const allUnavailableHours = useMemo(() => {
       const resourcesList = resources || [];
       const isResourceSupported = numberOfDays === 1;
-      // If no resources or only one resource, apply all unavailable hours to the full width
-      if (resourcesList.length <= 1 || !isResourceSupported) {
+
+      // Resources not supported or not provided
+      if (!resourcesList.length || !isResourceSupported) {
         return unavailableHours.map((item) => ({
           item,
           resourceIndex: 0,
@@ -112,11 +113,25 @@ const UnavailableColumns = memo(
         }));
       }
 
-      // For multiple resources scenario
+      // Single resource (resource scrolling mode)
+      // Only show hours for the current resource
+      if (resourcesList.length === 1) {
+        const currentResourceId = resourcesList[0].id;
+        return unavailableHours
+          .filter(
+            (item) => !item.resourceId || item.resourceId === currentResourceId
+          )
+          .map((item) => ({
+            item,
+            resourceIndex: 0,
+            widthPercentage: widthPercentage || 1,
+          }));
+      }
+
+      // Multiple resources in view
       const result: UnavailableColumnHourProps[] = [];
       const widthPerResource = widthPercentage || 1 / resourcesList.length;
 
-      // Create a map for faster resource lookup
       const resourceMap = new Map<string, number>();
       resourcesList.forEach((resource, index) => {
         if (resource.id) {
@@ -124,10 +139,9 @@ const UnavailableColumns = memo(
         }
       });
 
-      // Process all unavailable hours in a single pass
       unavailableHours.forEach((item) => {
         if (!item.resourceId) {
-          // Global unavailable hour - apply to all resources
+          // Global hour - apply to all resources
           resourcesList.forEach((_, index) => {
             result.push({
               item,
@@ -136,7 +150,7 @@ const UnavailableColumns = memo(
             });
           });
         } else {
-          // Resource-specific unavailable hour
+          // Resource-specific hour
           const resourceIndex = resourceMap.get(item.resourceId);
           if (resourceIndex !== undefined) {
             result.push({
@@ -222,6 +236,9 @@ const UnavailableHourItem = ({
     [widthPercentage]
   );
 
+  const leftPosition =
+    diffDays * columnWidth + resourceIndex * (columnWidth * widthPercentage);
+
   return (
     <View
       pointerEvents={enableBackgroundInteraction ? 'none' : 'auto'}
@@ -231,9 +248,7 @@ const UnavailableHourItem = ({
         {
           backgroundColor,
           width: columnWidth * widthPercentage,
-          left:
-            diffDays * columnWidth +
-            resourceIndex * (columnWidth * widthPercentage),
+          left: leftPosition,
           top: `${(diffMinutes / totalMinutes) * 100}%`,
           height: `${(duration / totalMinutes) * 100}%`,
         },

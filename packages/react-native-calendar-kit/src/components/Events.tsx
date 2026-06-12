@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import React, { useCallback, useMemo } from 'react';
-import { StyleSheet, View, type GestureResponderEvent } from 'react-native';
+import { Platform, StyleSheet, View, type GestureResponderEvent } from 'react-native';
 import { useActions } from '../context/ActionsProvider';
 import { useBody } from '../context/BodyContext';
 import {
@@ -10,7 +10,7 @@ import {
 import { useRegularEvents } from '../context/EventsProvider';
 import { useTimezone } from '../context/TimeZoneProvider';
 import type { PackedEvent, ResourceItem } from '../types';
-import { forceUpdateZone, parseDateTime } from '../utils/dateUtils';
+import { parseDateTime } from '../utils/dateUtils';
 import EventItem from './EventItem';
 
 const Events: FC<{
@@ -51,15 +51,19 @@ const Events: FC<{
       if (!event.start.dateTime || !event.end.dateTime) {
         return;
       }
+      if (event.draggable === false) {
+        return;
+      }
 
-      const eventStart = forceUpdateZone(
-        event._internal.startUnix,
-        timeZone
-      ).startOf('day');
-      const originalStart = forceUpdateZone(
-        parseDateTime(event.start.dateTime, { zone: event.start.timeZone }),
-        timeZone
-      ).startOf('day');
+      // Fix: Use parseDateTime().setZone() instead of forceUpdateZone() for proper timezone handling
+      // forceUpdateZone uses keepLocalTime: true which corrupts timestamps when device timezone
+      // differs from business timezone, causing drag to fail for events near midnight
+      const eventStart = parseDateTime(event._internal.startUnix)
+        .setZone(timeZone)
+        .startOf('day');
+      const originalStart = parseDateTime(event.start.dateTime, { zone: event.start.timeZone })
+        .setZone(timeZone)
+        .startOf('day');
       const startIndex = eventStart.diff(originalStart, 'days').days;
       triggerDragEvent!(
         {
@@ -100,7 +104,20 @@ const Events: FC<{
   const _renderEvent = (event: PackedEvent) => {
     return (
       <EventItem
-        key={event.localId}
+        // Android-only: include packed layout state (zIndex, xOffset) in the key
+        // so the View remounts when overlap topology changes. Works around an
+        // Android paint-state bug where the native View doesn't repaint after a
+        // sibling is removed (e.g. delete a block that contained an appointment
+        // — the appointment was rendered as 'contained' with zIndex 2 / offset
+        // 10%, becomes solo at zIndex 1 / offset 0; React updates the style but
+        // Android keeps the old paint, leaving the View tappable but invisible).
+        // iOS handles this correctly via CALayer, so we keep its stable key to
+        // avoid unnecessary unmount/remount cost.
+        key={
+          Platform.OS === 'android'
+            ? `${event.localId}-z${event._internal.zIndex}-x${event._internal.xOffsetPercentage}`
+            : event.localId
+        }
         event={event}
         startUnix={startUnix}
         renderEvent={renderEvent}

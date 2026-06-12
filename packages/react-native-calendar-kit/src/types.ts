@@ -86,6 +86,12 @@ export interface ThemeConfigs {
 
   /** Default style of the event */
   eventTitleStyle?: TextStyle;
+
+  /** Border color for overlapped/stacked events. Set to null to disable border. Default: '#FFF' */
+  overlapEventBorderColor?: string | null;
+
+  /** Border width for overlapped/stacked events. Default: 1 */
+  overlapEventBorderWidth?: number;
 }
 
 export type GoToDateOptions = {
@@ -147,6 +153,18 @@ export interface CalendarKitHandle {
     animated?: boolean,
     scrollType?: 'resource' | 'page'
   ) => void;
+
+  /**
+   * Confirms the pending drag operation when `requireDragConfirmation` is enabled.
+   * Only available when a drag operation is awaiting confirmation.
+   */
+  confirmDrag: () => void;
+
+  /**
+   * Cancels the pending drag operation when `requireDragConfirmation` is enabled.
+   * Only available when a drag operation is awaiting confirmation.
+   */
+  cancelDrag: () => void;
 }
 
 /**
@@ -236,6 +254,33 @@ export interface ActionsProviderProps {
 
   /** Callback when the drag create event is ended */
   onDragCreateEventEnd?: (event: OnCreateEventResponse) => Promise<void> | void;
+
+  /**
+   * Callback when drag operation is pending confirmation (requireDragConfirmation=true).
+   * Use the provided confirm/cancel callbacks or the imperative API to finalize.
+   */
+  onDragEventPending?: (
+    event: OnEventResponse,
+    actions: { confirm: () => void; cancel: () => void }
+  ) => void;
+
+  /**
+   * Callback when selected event drag operation is pending confirmation (requireDragConfirmation=true).
+   * Use the provided confirm/cancel callbacks or the imperative API to finalize.
+   */
+  onDragSelectedEventPending?: (
+    event: SelectedEventType,
+    actions: { confirm: () => void; cancel: () => void }
+  ) => void;
+
+  /**
+   * Callback when drag create operation is pending confirmation (requireDragConfirmation=true).
+   * Use the provided confirm/cancel callbacks or the imperative API to finalize.
+   */
+  onDragCreateEventPending?: (
+    event: OnCreateEventResponse,
+    actions: { confirm: () => void; cancel: () => void }
+  ) => void;
 
   /** Callback when the calendar is loaded */
   onLoad?: () => void;
@@ -393,8 +438,22 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    */
   minTimeIntervalHeight?: number;
 
+  /**
+   * Initial zoom scale factor for the calendar.
+   * 1.0 = no zoom (default). Values > 1 zoom in, < 1 zoom out.
+   * Useful for restoring a persisted zoom level.
+   */
+  initialZoomScale?: number;
+
   /** Enable pinch to scale height of the calendar */
   allowPinchToZoom?: boolean;
+
+  /**
+   * Callback when zoom level changes.
+   * Provides zoom percentage (0-100) where 0 is min zoom, 100 is max zoom.
+   * Useful for adjusting UI based on zoom level (e.g., showing 15-min intervals when zoomed in).
+   */
+  onZoomChange?: (zoomPercent: number) => void;
 
   /** Custom time zone */
   timeZone?: string;
@@ -474,6 +533,21 @@ export interface CalendarProviderProps extends ActionsProviderProps {
   selectedEvent?: SelectedEventType;
 
   /**
+   * Require manual confirmation after drag operation completes.
+   * When enabled, both the dimmed original and draggable event remain visible
+   * until confirmed or cancelled via onDragEventPending callbacks or imperative API.
+   *
+   * - `true` - all drag modes require confirmation
+   * - `['edit']` - only regular drag-to-edit requires confirmation
+   * - `['create']` - only drag-to-create requires confirmation
+   * - `['selected']` - only drag selected event requires confirmation
+   * - `['edit', 'create']` - both edit and create require confirmation
+   *
+   * Default is `false`
+   */
+  requireDragConfirmation?: boolean | Array<'edit' | 'create' | 'selected'>;
+
+  /**
    * Specify the number of pages to render ahead and behind the current page.
    *
    * Default is `2`
@@ -507,9 +581,77 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * overlapping. This affects how events are positioned and displayed when
    * using 'overlap' overlapType.
    *
+   * @deprecated Use overlappingConfig instead
    * Default is `30` minutes
    */
   minStartDifference?: number;
+
+  /**
+   * Enhanced overlapping configuration for event layout.
+   * When provided, enables intelligent layout strategies (stacked, side-by-side, contained).
+   * When not provided, uses legacy overlap mode based on overlapType prop.
+   *
+   * Layout decision logic:
+   * 1. "stacked": if startTimeDiff >= minStartDifferenceForStack AND durationDiff <= durationDiffThreshold
+   * 2. "contained": if startTimeDiff >= minStartDifferenceForStack AND durationDiff > durationDiffThreshold
+   * 3. "side-by-side": if startTimeDiff < minStartDifferenceForStack (default fallback)
+   */
+  overlappingConfig?: {
+    /**
+     * Minimum start time difference (in minutes) for events to be stacked/contained vs side-by-side.
+     * - Events starting within this threshold → side-by-side
+     * - Events starting beyond this threshold → stacked or contained (based on duration difference)
+     *
+     * Default is `30` minutes
+     */
+    minStartDifferenceForStack?: number;
+
+    /**
+     * Duration difference threshold (in minutes) for stacked vs contained layout.
+     * Only applies when startTimeDiff >= minStartDifferenceForStack.
+     * - If durationDiff <= threshold → stacked layout
+     * - If durationDiff > threshold → contained layout
+     *
+     * Default is `30` minutes
+     */
+    durationDiffThreshold?: number;
+
+    /**
+     * Horizontal offset for each stacked layer.
+     * Can be either:
+     * - A number (pixels): `10` = 10px offset
+     * - A percentage string: `"10%"` = 10% of column width
+     *
+     * Default is `10` (pixels)
+     */
+    stackOffset?: number | string;
+
+    /**
+     * Horizontal offset for contained/overlay layout.
+     * This is the offset applied to events that are contained within longer events.
+     * Can be either:
+     * - A number (pixels): `10` = 10px offset
+     * - A percentage string: `"10%"` = 10% of column width
+     *
+     * Default is `10` (pixels, same as stackOffset)
+     */
+    containedOffset?: number | string;
+
+    /**
+     * Maximum total offset as percentage of available width.
+     * Prevents events from being pushed too far right.
+     *
+     * Default is `40`
+     */
+    maxStackOffsetPercentage?: number;
+
+    /**
+     * Gap between side-by-side events in pixels.
+     *
+     * Default is `1`
+     */
+    sideBySideGap?: number;
+  };
 
   /** Resource list */
   resources?: ResourceItem[];
@@ -561,6 +703,39 @@ export interface CalendarProviderProps extends ActionsProviderProps {
 
   /** Resource paging enabled */
   resourcePagingEnabled?: boolean;
+
+  /**
+   * Allow dragging events to different resource columns.
+   * When set to `false`, events can only be dragged within their original
+   * resource column (locked to same resource).
+   *
+   * Default: `true`
+   */
+  allowDragToOtherResources?: boolean;
+
+  /**
+   * Show end time label when dragging events.
+   * When set to `false`, only the start time label is shown during drag operations.
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
+
+  /**
+   * Show visual feedback when tapping on an empty time slot.
+   * Displays a selection box at the tapped location that auto-hides after 500ms.
+   *
+   * Default: `false`
+   */
+  showTapFeedback?: boolean;
+
+  /**
+   * Snap interval for tap feedback indicator in minutes.
+   * The tapped time will be rounded down to the nearest interval.
+   *
+   * Default: `15`
+   */
+  tapFeedbackInterval?: number;
 }
 
 export interface ResourceItem extends Record<string, any> {
@@ -633,6 +808,9 @@ export interface EventItem extends Record<string, any> {
 
   /** Resource ID for the event. */
   resourceId?: string;
+
+  /** Whether this event can be dragged when drag-to-edit is enabled. Default: true */
+  draggable?: boolean;
 }
 
 export interface HighlightDateProps {
@@ -734,6 +912,17 @@ export interface CalendarHeaderProps {
   eventInitialMinutes?: number;
 
   insetBottom?: number;
+
+  /**
+   * Enable/disable horizontal scrolling for the day-bar (header) list.
+   *
+   * When `false`, the header won't be scrollable by the user and won't
+   * participate as the active scroll source (prevents it from becoming active
+   * for linked scrolling). It can still be kept in sync by the body/grid.
+   *
+   * - Default: `true` (uses the global `allowHorizontalSwipe` behavior)
+   */
+  dayBarScrollEnabled?: boolean;
 }
 
 export interface CalendarBodyProps {
@@ -752,11 +941,31 @@ export interface CalendarBodyProps {
    */
   renderDraggingHour?: (props: RenderHourProps) => React.ReactElement | null;
 
+  /** Custom half-hour text rendered at :30 between each hour label
+   *
+   * Note: Please use `useCallback` to memoize the function
+   */
+  renderHalfHour?: (props: RenderHourProps) => React.ReactElement | null;
+
+  /** Custom quarter-hour text rendered at :15 and :45 between each hour label
+   *
+   * Note: Please use `useCallback` to memoize the function
+   */
+  renderQuarterHour?: (props: RenderHourProps) => React.ReactElement | null;
+
   /** Show now indicator */
   showNowIndicator?: boolean;
 
   /** Show right bar of the TimeColumn component */
   showTimeColumnRightLine?: boolean;
+
+  /**
+   * Show quarter-hour lines (15 min intervals) on the calendar grid.
+   * When enabled, lines appear at :15 and :45 in addition to :00 and :30.
+   *
+   * Default: `false`
+   */
+  showQuarterHourLines?: boolean;
 
   /** Custom Out of Range item
    *
@@ -813,6 +1022,46 @@ export interface CalendarBodyProps {
 
   /** Custom now indicator */
   NowIndicatorComponent?: React.ReactElement | null;
+
+  /**
+   * Show end time label when dragging events.
+   * When set to `false`, only the start time label is shown during drag operations.
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
+
+  /**
+   * Border color for tap feedback indicator.
+   *
+   * Default: `'rgba(0,0,0,0.3)'`
+   */
+  tapFeedbackBorderColor?: string;
+
+  /**
+   * Style for the day-end boundary line shown between days in resource scroll mode.
+   * Providing this object enables the line. Omit to disable.
+   *
+   * Defaults when enabled: `{ borderWidth: 1, borderStyle: 'dashed', borderColor: theme.colors.border }`
+   */
+  dayEndLineStyle?: {
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted';
+    borderColor?: string;
+  };
+
+  /**
+   * Headless children rendered inside BodyContext.Provider.
+   *
+   * Use this to mount side-effect components that need access to the
+   * BodyContext (e.g. SharedValue capture for zoom persistence) without
+   * being coupled to the CalendarBody component or the
+   * NowIndicatorComponent's lifecycle (which only mounts when today is visible).
+   *
+   * Children are rendered after the calendar grid, so any non-null output
+   * will overlay the calendar.
+   */
+  children?: React.ReactNode;
 }
 
 export interface RenderHourProps {
@@ -864,6 +1113,9 @@ export interface PackedEvent extends EventItemInternal {
     widthPercentage?: number;
     xOffsetPercentage?: number;
     index?: number;
+    zIndex?: number;
+    stackLevel?: number;
+    layoutType?: 'stacked' | 'side-by-side' | 'contained';
   };
 }
 
@@ -878,5 +1130,18 @@ export interface PackedAllDayEvent extends EventItemInternal {
 
 export interface SizeAnimation {
   width: SharedValue<number>;
+  /**
+   * Layout height at base zoom. Visual height = height * zoomScale.
+   * This value stays constant during pinch — the visual scaling is handled
+   * by a GPU-accelerated scaleY transform on the container.
+   */
   height: SharedValue<number>;
+  /**
+   * Persistent zoom scale factor. 1.0 = initial zoom.
+   * Changes during pinch gesture, persists after gesture ends (NOT reset to 1).
+   *
+   * Consumers should apply `transform: [{ scaleY: 1/zoomScale }]` to content
+   * they don't want vertically stretched by the container's scaleY transform.
+   */
+  zoomScale: SharedValue<number>;
 }

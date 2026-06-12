@@ -4,17 +4,18 @@ import type { ViewStyle } from 'react-native';
 import { StyleSheet, Text, View } from 'react-native';
 import type { SharedValue } from 'react-native-reanimated';
 import Animated, {
+  runOnJS,
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import { useBody } from '../context/BodyContext';
 import { useDragEvent } from '../context/DragEventProvider';
 import { useTheme } from '../context/ThemeProvider';
 import type { ResourceItem, SelectedEventType } from '../types';
-import { clampValues, findNearestNumber } from '../utils/utils';
+import { getDayIndex, getEventWidth } from '../utils/positionUtils';
+import { clampValues } from '../utils/utils';
 import DragDot from './DragDot';
 
 export interface DraggingEventProps {
@@ -30,6 +31,24 @@ export interface DraggingEventProps {
   containerStyle?: ViewStyle;
   resources?: ResourceItem[];
 }
+
+/**
+ * Get resource index by calculating from drag X position.
+ */
+const getResourceIndexByPosition = (
+  dragX: number,
+  hourWidth: number,
+  eventWidth: number,
+  totalResources: number
+): number => {
+  'worklet';
+  if (totalResources === 1) {
+    return 0;
+  }
+  const xWithoutHourWidth = dragX - hourWidth;
+  const columnIndex = Math.floor(xWithoutHourWidth / eventWidth);
+  return clampValues(columnIndex, 0, totalResources - 1);
+};
 
 export const DraggingEvent: FC<DraggingEventProps> = ({
   renderEvent,
@@ -60,6 +79,8 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     dragToCreateMode,
     enableResourceScroll,
     resourcePerPage,
+    counterScaleStyle,
+    zoomScale,
   } = useBody();
   const {
     dragDuration,
@@ -74,60 +95,40 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
 
   const totalResources =
     resources && resources.length > 1 ? resources.length : 1;
-  const getDayIndex = (dayUnix: number) => {
-    'worklet';
-    let currentIndex = calendarData.visibleDatesArray.indexOf(dayUnix);
-    if (currentIndex === -1) {
-      const nearestVisibleUnix = findNearestNumber(
-        calendarData.visibleDatesArray,
-        dayUnix
-      );
-      const nearestVisibleIndex =
-        calendarData.visibleDates[nearestVisibleUnix]?.index;
-      if (!nearestVisibleIndex) {
-        return 0;
-      }
-      currentIndex = nearestVisibleIndex;
-    }
-    let startIndex = calendarData.visibleDatesArray.indexOf(
-      visibleDateUnixAnim.value
-    );
-    if (startIndex === -1) {
-      const nearestVisibleUnix = findNearestNumber(
-        calendarData.visibleDatesArray,
-        dayUnix
-      );
-      const nearestVisibleIndex =
-        calendarData.visibleDates[nearestVisibleUnix]?.index;
-      if (!nearestVisibleIndex) {
-        return 0;
-      }
-      startIndex = nearestVisibleIndex;
-    }
-    return clampValues(currentIndex - startIndex, 0, columns - 1);
-  };
-  const eventWidth =
-    columnWidth / (enableResourceScroll ? resourcePerPage : totalResources);
+
+  const eventWidth = getEventWidth(
+    columnWidth,
+    enableResourceScroll,
+    resourcePerPage,
+    totalResources
+  );
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
 
   const resourceIndex = useDerivedValue(() => {
-    if (totalResources === 1) {
-      return 0;
-    }
-
-    const xWithoutHourWidth = dragX.value - hourWidth;
-    const columnIndex = Math.floor(xWithoutHourWidth / eventWidth);
-    return clampValues(columnIndex, 0, totalResources - 1);
+    return getResourceIndexByPosition(
+      dragX.value,
+      hourWidth,
+      eventWidth,
+      totalResources
+    );
   }, [totalResources, hourWidth]);
 
-  const internalDayIndex = useSharedValue(getDayIndex(dragStartUnix.value));
+  const internalDayIndex = useSharedValue(
+    getDayIndex(dragStartUnix.value, calendarData, visibleDateUnixAnim, columns)
+  );
 
   useAnimatedReaction(
     () => dragStartUnix.value,
     (dayUnix) => {
       if (dayUnix !== -1) {
-        const dayIndex = getDayIndex(dayUnix);
-        internalDayIndex.value = withTiming(dayIndex, { duration: 100 });
+        const dayIndex = getDayIndex(
+          dayUnix,
+          calendarData,
+          visibleDateUnixAnim,
+          columns
+        );
+        // Update immediately without animation to avoid position lag after drag ends
+        internalDayIndex.value = dayIndex;
       }
     }
   );
@@ -139,6 +140,7 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
   const animView = useAnimatedStyle(() => {
     const startX = resourceIndex.value * eventWidth;
     const dIndex = enableResourceScroll ? 0 : internalDayIndex.value;
+
     return {
       top: (dragStartMinutes.value - start) * minuteHeight.value,
       height: dragDuration.value * minuteHeight.value,
@@ -151,19 +153,20 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
       return null;
     }
 
-    if (TopEdgeComponent) {
-      return TopEdgeComponent;
-    }
-
+    // Default (center) transformOrigin so counter-scale shrinks the dot
+    // around its own center. The dot is already positioned by layout
+    // (top: -12) so its visual center sits exactly on the event's top
+    // edge — center-origin scale keeps it there at any zoom.
     return (
-      <View
+      <Animated.View
         style={[
           styles.dot,
           styles.dotLeft,
           numberOfDays === 1 && styles.dotLeftSingle,
+          counterScaleStyle,
         ]}>
-        <DragDot />
-      </View>
+        {TopEdgeComponent || <DragDot />}
+      </Animated.View>
     );
   };
 
@@ -172,46 +175,99 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
       return null;
     }
 
-    if (BottomEdgeComponent) {
-      return BottomEdgeComponent;
-    }
-
     return (
-      <View
+      <Animated.View
         style={[
           styles.dot,
           styles.dotRight,
           numberOfDays === 1 && styles.dotRightSingle,
+          counterScaleStyle,
         ]}>
-        <DragDot />
-      </View>
+        {BottomEdgeComponent || <DragDot />}
+      </Animated.View>
     );
   };
 
+  // Base border width / radius — sourced from consumer's containerStyle
+  // first, then theme.eventContainerStyle, then library defaults. Always
+  // zoom-compensate so the consumer's static value doesn't visibly stretch
+  // at high zoom.
+  const consumerBorderWidth =
+    typeof (containerStyle as { borderWidth?: number } | undefined)
+      ?.borderWidth === 'number'
+      ? (containerStyle as { borderWidth: number }).borderWidth
+      : undefined;
+  const consumerBorderRadius =
+    typeof (containerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (containerStyle as { borderRadius: number }).borderRadius
+      : undefined;
+  const themeBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
+      : undefined;
+  const baseDraggingWidth = consumerBorderWidth ?? 3;
+  const baseDraggingRadius =
+    consumerBorderRadius ?? themeBorderRadius ?? 4;
+
+  // Left/right border width is static (X axis not scaled by zoom) —
+  // mirrors baseDraggingWidth so all four sides match at any zoom.
+  const sideBordersStyle = {
+    borderLeftWidth: baseDraggingWidth,
+    borderRightWidth: baseDraggingWidth,
+  };
+  // Top/bottom widths + borderRadius animate with zoom so their visual
+  // values stay constant. Drag is mutually exclusive with pinch, so
+  // zoomScale is constant during drag — this animated layout prop fires
+  // at most once per drag mount.
+  const outlineBorderStyle = useAnimatedStyle(() => ({
+    borderTopWidth: baseDraggingWidth / zoomScale.value,
+    borderBottomWidth: baseDraggingWidth / zoomScale.value,
+    // RN has no asymmetric X/Y radii, so horizontal radius flattens at
+    // high zoom — accepted trade-off vs the alternative of unbounded
+    // vertical curve eating into content.
+    borderRadius: baseDraggingRadius / zoomScale.value,
+  }));
+
   return (
     <Animated.View style={[styles.container, { width: eventWidth }, animView]}>
-      <View
+      <Animated.View
         style={[
           StyleSheet.absoluteFill,
           theme.eventContainerStyle,
-          styles.event,
+          // Backgrounds + library default borderColor — consumer's
+          // containerStyle.borderColor (if any) overrides via the array
+          // order below.
           {
             backgroundColor: draggingEvent?.color ?? 'transparent',
             borderColor: theme.primaryColor,
+            overflow: 'hidden',
           },
           containerStyle,
+          // Apply our computed border widths/radius LAST so they always
+          // win over consumer's static shorthand `borderWidth` — RN's
+          // per-side border merging makes side-specific properties
+          // override the shorthand, which is exactly what we want here.
+          sideBordersStyle,
+          outlineBorderStyle,
         ]}>
-        {renderEvent
-          ? renderEvent(draggingEvent, {
-              width: eventWidthAnim,
-              height: eventHeight,
-            })
-          : !!draggingEvent?.title && (
+        {renderEvent ? (
+          renderEvent(draggingEvent, {
+            width: eventWidthAnim,
+            height: eventHeight,
+          })
+        ) : (
+          <Animated.View
+            style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
+            {!!draggingEvent?.title && (
               <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
                 {draggingEvent.title}
               </Text>
             )}
-      </View>
+          </Animated.View>
+        )}
+      </Animated.View>
       {isShowDot && renderTopEdgeComponent()}
       {isShowDot && renderBottomEdgeComponent()}
     </Animated.View>
@@ -245,7 +301,23 @@ const DraggingEventWrapper = ({
   resources,
 }: DraggingEventWrapperProps) => {
   const { isDragging } = useDragEvent();
-  if (!isDragging) {
+  const { isPendingConfirmation } = useDragEvent();
+  const [isVisible, setIsVisible] = React.useState(false);
+
+  // Keep dragging event visible during drag or pending confirmation
+  useAnimatedReaction(
+    () => isPendingConfirmation.value,
+    (pending) => {
+      runOnJS(setIsVisible)(isDragging || pending);
+    },
+    [isDragging]
+  );
+
+  React.useEffect(() => {
+    setIsVisible(isDragging || isPendingConfirmation.value);
+  }, [isDragging, isPendingConfirmation]);
+
+  if (!isVisible) {
     return null;
   }
 
@@ -272,8 +344,9 @@ const styles = StyleSheet.create({
     height: 24,
   },
   event: {
-    borderWidth: 3,
-    borderRadius: 4,
+    borderLeftWidth: 3,
+    borderRightWidth: 3,
+    // borderRadius supplied by outlineBorderStyle (animated by zoom).
     overflow: 'hidden',
   },
   dotLeft: { top: -12, left: -12 },

@@ -8,10 +8,8 @@ import type Animated from 'react-native-reanimated';
 import {
   type AnimatedRef,
   type ReanimatedEvent,
-  runOnJS,
   scrollTo,
   type SharedValue,
-  useAnimatedReaction,
   useEvent,
   useSharedValue,
 } from 'react-native-reanimated';
@@ -37,36 +35,49 @@ export const useLinkedScrollGroup = (
     providedOffset ?? internalOffset
   ).current;
   const activeId = useRef<string | null>(null);
-  const activeTag = useSharedValue<number | null>(null);
+  const activeTagRef = useRef<number | null>(null);
   const listenersInitialized = useRef(false);
   const peers = useSharedValue<AnimatedRef<Animated.ScrollView>[]>([]);
   const peersRef = useRef<AnimatedRef<Animated.ScrollView>[]>([]);
 
+  // Track the last offset we issued scrollTo() for. On Fabric every
+  // scrollTo on a peer is a separate native scroll commit; calling it
+  // every scroll frame even when the offset hasn't drifted from the
+  // previous tick produces redundant native commits on the peer
+  // ScrollView and drops UI FPS on heavy peer subtrees (e.g. the
+  // calendar header with custom resource cards). The 1-pixel threshold
+  // collapses noise while keeping the peer pixel-aligned at rest.
+  const lastSyncedX = useSharedValue(0);
+  const lastSyncedY = useSharedValue(0);
   const eventHandler = useEvent<NativeSyntheticEvent<NativeScrollEvent>>(
     (event: ReanimatedEvent<NativeSyntheticEvent<NativeScrollEvent>>) => {
       'worklet';
-      offset.value =
-        event.contentOffset.x === 0
-          ? event.contentOffset.y
-          : event.contentOffset.x;
+      const cx = event.contentOffset.x;
+      const cy = event.contentOffset.y;
+      offset.value = cx === 0 ? cy : cx;
 
-      peers.value.forEach((peer) => {
-        scrollTo(peer, event.contentOffset.x, event.contentOffset.y, false);
-      });
+      if (
+        Math.abs(cx - lastSyncedX.value) >= 1 ||
+        Math.abs(cy - lastSyncedY.value) >= 1
+      ) {
+        lastSyncedX.value = cx;
+        lastSyncedY.value = cy;
+        peers.value.forEach((peer) => {
+          scrollTo(peer, cx, cy, false);
+        });
+      }
     },
     scrollNativeEventNames
   ) as unknown as EventHandlerInternal<NativeSyntheticEvent<NativeScrollEvent>>;
 
   const subscribeToScroll = useCallback(
-    (currentTag: number, previousActiveTag: number | null) => {
-      if (previousActiveTag) {
-        eventHandler.workletEventHandler.unregisterFromEvents(
-          previousActiveTag
-        );
+    (currentTag: number) => {
+      const prevTag = activeTagRef.current;
+      if (prevTag && prevTag !== currentTag) {
+        eventHandler.workletEventHandler.unregisterFromEvents(prevTag);
       }
-      if (currentTag) {
-        eventHandler.workletEventHandler.registerForEvents(currentTag);
-      }
+      eventHandler.workletEventHandler.registerForEvents(currentTag);
+      activeTagRef.current = currentTag;
     },
     [eventHandler.workletEventHandler]
   );
@@ -80,6 +91,7 @@ export const useLinkedScrollGroup = (
         }
       }
     });
+    activeTagRef.current = null;
   }, [eventHandler.workletEventHandler]);
 
   useEffect(() => {
@@ -88,19 +100,7 @@ export const useLinkedScrollGroup = (
     };
   }, [unsubscribeAll]);
 
-  useAnimatedReaction(
-    () => activeTag.value,
-    (currentTag, previousActiveTag) => {
-      if (currentTag) {
-        runOnJS(subscribeToScroll)(currentTag, previousActiveTag);
-      } else {
-        runOnJS(unsubscribeAll)();
-      }
-    },
-    [eventHandler.workletEventHandler, unsubscribeAll]
-  );
-
-  const onTouchStartHandler = useCallback(
+  const activateController = useCallback(
     (triggerId: string) => {
       const selectedController = allControllers.current.find(
         (controller) => controller.id === triggerId
@@ -109,7 +109,7 @@ export const useLinkedScrollGroup = (
 
       if (elementTag) {
         activeId.current = triggerId;
-        activeTag.value = elementTag;
+        subscribeToScroll(elementTag);
         const peerRefs = allControllers.current
           .filter((controller) => controller.id !== triggerId)
           .map((controller) => controller.ref);
@@ -117,7 +117,28 @@ export const useLinkedScrollGroup = (
         peers.value = peerRefs;
       }
     },
-    [activeTag, peers]
+    [peers, subscribeToScroll]
+  );
+
+  const onTouchStartHandler = useCallback(
+    (triggerId: string) => {
+      activateController(triggerId);
+    },
+    [activateController]
+  );
+
+  const onScrollBeginDragHandler = useCallback(
+    (triggerId: string) => {
+      activateController(triggerId);
+    },
+    [activateController]
+  );
+
+  const onMomentumScrollBeginHandler = useCallback(
+    (triggerId: string) => {
+      activateController(triggerId);
+    },
+    [activateController]
   );
 
   const initializeListeners = useCallback(() => {
@@ -126,8 +147,17 @@ export const useLinkedScrollGroup = (
     }
 
     scrollListeners.current.set('onTouchStart', onTouchStartHandler);
+    scrollListeners.current.set('onScrollBeginDrag', onScrollBeginDragHandler);
+    scrollListeners.current.set(
+      'onMomentumScrollBegin',
+      onMomentumScrollBeginHandler
+    );
     listenersInitialized.current = true;
-  }, [onTouchStartHandler]);
+  }, [
+    onTouchStartHandler,
+    onScrollBeginDragHandler,
+    onMomentumScrollBeginHandler,
+  ]);
 
   const addAndGet = useCallback(
     (
@@ -162,9 +192,9 @@ export const useLinkedScrollGroup = (
 
       if (controllerToRemove?.ref?.getTag) {
         const tag = controllerToRemove.ref.getTag();
-        if (activeTag.value === tag) {
+        if (activeTagRef.current === tag) {
           activeId.current = null;
-          activeTag.value = null;
+          activeTagRef.current = null;
         }
         if (tag) {
           eventHandler.workletEventHandler.unregisterFromEvents(tag);
@@ -175,7 +205,7 @@ export const useLinkedScrollGroup = (
         (controller) => controller.id !== id
       );
     },
-    [activeTag, eventHandler.workletEventHandler]
+    [eventHandler.workletEventHandler]
   );
 
   const setOffset = useCallback(
@@ -213,10 +243,34 @@ const createLinkedScrollController = ({
     });
   };
 
+  const onScrollBeginDrag = (
+    _event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => {
+    scrollListeners.current?.forEach((listener, key) => {
+      if (key === 'onScrollBeginDrag') {
+        listener(id, { x: 0, y: 0 });
+      }
+    });
+  };
+
+  const onMomentumScrollBegin = (
+    _event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => {
+    scrollListeners.current?.forEach((listener, key) => {
+      if (key === 'onMomentumScrollBegin') {
+        listener(id, { x: 0, y: 0 });
+      }
+    });
+  };
+
   const instance = {
     id,
     ref: scrollRef,
-    getScrollController: () => ({ onTouchStart }),
+    getScrollController: () => ({
+      onTouchStart,
+      onScrollBeginDrag,
+      onMomentumScrollBegin,
+    }),
   };
 
   return instance;

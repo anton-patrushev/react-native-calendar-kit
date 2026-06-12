@@ -57,6 +57,7 @@ interface CalendarListProps {
   scrollEnabled?: boolean;
   onLoad?: () => void;
   onTouchStart?: (event: GestureResponderEvent) => void;
+  decelerationRate?: 'fast' | 'normal' | number;
 
   /**
    * Fires if a user initiates a scroll gesture.
@@ -131,34 +132,14 @@ export const CalendarList = React.forwardRef<
       onMomentumScrollEnd,
       onScrollEndDrag,
       onWheel,
+      decelerationRate,
     },
     ref
   ) => {
     const scrollViewRef = useRef<ScrollView>(null);
-    const [scrollOffset, setScrollOffset] = useState(initialOffset ?? 0);
     const isLoaded = useRef(false);
 
     const totalSize = count * itemSize;
-
-    const visibleRange = useMemo(() => {
-      if (count === 0) {
-        return { start: 0, end: 0 };
-      }
-
-      const buffer = drawDistance;
-      const scrollStart = Math.max(0, scrollOffset - buffer);
-      const scrollEnd = scrollOffset + itemSize + buffer;
-      const startIndex = Math.max(0, Math.floor(scrollStart / itemSize));
-      const endIndex = Math.min(count - 1, Math.floor(scrollEnd / itemSize));
-      return { start: startIndex, end: endIndex };
-    }, [count, scrollOffset, drawDistance, itemSize]);
-
-    const getItemPosition = useCallback(
-      (index: number) => {
-        return index * itemSize;
-      },
-      [itemSize]
-    );
 
     const animScrollRef = useAnimatedRef<Animated.ScrollView>();
     const internalOffset = useSharedValue(initialOffset ?? 0);
@@ -167,6 +148,59 @@ export const CalendarList = React.forwardRef<
     const extraScrollDataRef = useRef(extraScrollData);
     extraScrollDataRef.current = extraScrollData;
     const onVisibleColumnChangedCb = useLatestCallback(onVisibleColumnChanged);
+
+    // Visible range lives in state directly (not derived from a per-frame
+    // scrollOffset state). The animated reaction below computes it on the
+    // UI thread and only commits to JS when start/end actually change —
+    // intra-range scroll movements no longer re-render this list.
+    const computeRange = useCallback(
+      (offset: number) => {
+        if (count === 0) {
+          return { start: 0, end: 0 };
+        }
+        const buffer = drawDistance;
+        const scrollStart = Math.max(0, offset - buffer);
+        const scrollEnd = offset + itemSize + buffer;
+        const startIndex = Math.max(0, Math.floor(scrollStart / itemSize));
+        const endIndex = Math.min(
+          count - 1,
+          Math.floor(scrollEnd / itemSize)
+        );
+        return { start: startIndex, end: endIndex };
+      },
+      [count, drawDistance, itemSize]
+    );
+
+    const [visibleRange, setVisibleRange] = useState(() =>
+      computeRange(initialOffset ?? 0)
+    );
+
+    // Recompute when count/itemSize/drawDistance change (props-driven).
+    useEffect(() => {
+      setVisibleRange((prev) => {
+        const next = computeRange(internalOffset.value);
+        return prev.start === next.start && prev.end === next.end
+          ? prev
+          : next;
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [computeRange]);
+
+    const updateVisibleRange = useCallback(
+      (start: number, end: number) => {
+        setVisibleRange((prev) =>
+          prev.start === start && prev.end === end ? prev : { start, end }
+        );
+      },
+      []
+    );
+
+    const getItemPosition = useCallback(
+      (index: number) => {
+        return index * itemSize;
+      },
+      [itemSize]
+    );
 
     const handleColumnChanged = useCallback(
       (offset: number) => {
@@ -188,11 +222,46 @@ export const CalendarList = React.forwardRef<
       [itemSize, columnsPerPage, onVisibleColumnChangedCb]
     );
 
+    // Computes column+range on the UI thread per scroll frame and only
+    // dispatches to JS when (a) page/column index changes (for
+    // handleColumnChanged → useSyncedList debounces) or (b) visible
+    // window start/end changes (for virtualization). Prior implementation
+    // fired runOnJS(setScrollOffset) every frame which made the list
+    // re-render at ~60 Hz — expensive when the body subtree is scaled
+    // post-pinch on Fabric.
     useAnimatedReaction(
-      () => scrollOffsetAnim.value,
-      (offset) => {
-        runOnJS(handleColumnChanged)(offset);
-        runOnJS(setScrollOffset)(offset);
+      () => {
+        const offset = scrollOffsetAnim.value;
+        const colWidth = columnsPerPage > 0 ? itemSize / columnsPerPage : itemSize;
+        const colPageIdx = Math.floor(
+          Math.round(offset / colWidth) / columnsPerPage
+        );
+        const colOff = colPageIdx * itemSize;
+        const col = Math.round((offset - colOff) / colWidth);
+        const buffer = drawDistance;
+        const scrollStart = Math.max(0, offset - buffer);
+        const scrollEnd = offset + itemSize + buffer;
+        const startIndex = Math.max(0, Math.floor(scrollStart / itemSize));
+        const endIndex = Math.min(
+          count - 1,
+          Math.floor(scrollEnd / itemSize)
+        );
+        return { offset, colPageIdx, col, startIndex, endIndex };
+      },
+      (curr, prev) => {
+        if (!curr) return;
+        const columnChanged =
+          !prev || prev.colPageIdx !== curr.colPageIdx || prev.col !== curr.col;
+        const rangeChanged =
+          !prev ||
+          prev.startIndex !== curr.startIndex ||
+          prev.endIndex !== curr.endIndex;
+        if (columnChanged) {
+          runOnJS(handleColumnChanged)(curr.offset);
+        }
+        if (rangeChanged) {
+          runOnJS(updateVisibleRange)(curr.startIndex, curr.endIndex);
+        }
       }
     );
 
@@ -230,15 +299,17 @@ export const CalendarList = React.forwardRef<
             const columnWidth = itemSize / columnsPerPage;
             maxOffset = totalSize - columnWidth * visibleColumns;
           }
-          return offset >= 0 && offset <= maxOffset && offset !== scrollOffset;
+          return (
+            offset >= 0 && offset <= maxOffset && offset !== internalOffset.value
+          );
         },
       }),
       [
         columnsPerPage,
         count,
         getItemPosition,
+        internalOffset,
         itemSize,
-        scrollOffset,
         totalSize,
       ]
     );
@@ -296,6 +367,7 @@ export const CalendarList = React.forwardRef<
         snapToInterval={snapToInterval}
         onTouchStart={onTouchStart}
         snapToOffsets={snapToOffsets}
+        decelerationRate={decelerationRate}
         {...{ onWheel }}>
         <HorizontalVirtualizedList
           count={count}

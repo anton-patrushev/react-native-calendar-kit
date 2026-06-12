@@ -11,6 +11,9 @@ interface HorizontalLineProps {
   }) => React.ReactNode;
 }
 
+// Phase 1 perf: counter-scale removed. 1px horizontal divider visually
+// stretches to ~zoomScale px at high zoom; not worth a per-line
+// useAnimatedStyle + native commit per frame.
 const HorizontalLine = ({
   index,
   borderColor,

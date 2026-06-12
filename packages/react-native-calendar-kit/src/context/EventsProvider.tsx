@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useImperativeHandle,
+  useRef,
 } from 'react';
 import { DEFAULT_MIN_START_DIFFERENCE } from '../constants';
 import useLazyRef from '../hooks/useLazyRef';
@@ -55,6 +56,15 @@ interface EventsProviderProps {
   overlapType?: 'no-overlap' | 'overlap';
   minStartDifference?: number;
   resources?: ResourceItem[];
+  overlappingConfig?: {
+    minStartDifferenceForStack?: number;
+    durationDiffThreshold?: number;
+    stackOffset?: number | string;
+    containedOffset?: number | string;
+    maxStackOffsetPercentage?: number;
+    sideBySideGap?: number;
+  };
+  columnWidth?: number;
 }
 
 export interface EventsRef {
@@ -78,6 +88,8 @@ const EventsProvider: ForwardRefRenderFunction<
     overlapType = 'no-overlap',
     minStartDifference = DEFAULT_MIN_START_DIFFERENCE,
     resources,
+    overlappingConfig,
+    columnWidth,
   },
   ref
 ) => {
@@ -93,6 +105,30 @@ const EventsProvider: ForwardRefRenderFunction<
   ).current;
   const currentStartDate = useDateChangedListener();
 
+  // Tracks the input set the cached event store was built against. When
+  // a date-change-only useEffect re-runs with a new center date but the
+  // events prop reference, timezone and other range-shape inputs haven't
+  // changed AND the new center is still inside the cached window minus
+  // a one-page margin, we skip the heavy recompute. notifyDataChanged is
+  // O(events * processing) — when a consumer has hundreds of events the
+  // recompute alone can block JS for ~50-100ms, which compounds during a
+  // fast horizontal swipe and drops JS FPS toward 0.
+  const lastProcessed = useRef<{
+    events: EventItem[] | undefined;
+    timeZone: string | undefined;
+    pagesPerSide: number | undefined;
+    resources: ResourceItem[] | undefined;
+    minUnix: number;
+    maxUnix: number;
+  }>({
+    events: undefined,
+    timeZone: undefined,
+    pagesPerSide: undefined,
+    resources: undefined,
+    minUnix: 0,
+    maxUnix: 0,
+  });
+
   const notifyDataChanged = useCallback(
     (date: number, offset: number = defaultOffset) => {
       const zonedDate = forceUpdateZone(date, timeZone);
@@ -102,6 +138,50 @@ const EventsProvider: ForwardRefRenderFunction<
       const maxUnix = zonedDate
         .plus({ days: offset * (pagesPerSide + 1) })
         .toMillis();
+
+      // Skip the heavy recompute when nothing relevant changed AND the
+      // new center is still inside the cached window with at least one
+      // page of margin on each side. Without this gate, swiping across
+      // adjacent days re-runs the full event-processing pipeline (event
+      // filter + occurrence expansion + overlap packing for every day in
+      // the window) — easily 50-100ms per call on a typical core-mobile
+      // event load, which compounds with each column boundary and tanks
+      // JS FPS during fast scroll.
+      const cached = lastProcessed.current;
+      const eventsSame = cached.events === events;
+      const tzSame = cached.timeZone === timeZone;
+      const ppsSame = cached.pagesPerSide === pagesPerSide;
+      // `resources` is both written into the store below and fed to
+      // `populateEvents` (it decides which column an event packs into), so a
+      // change to it MUST force a recompute. Omitting it here strands the
+      // store at a stale resource set: on a single -> multi provider switch
+      // (events ref unchanged) the gate would skip, the store would keep its
+      // old `resources`, and the body's ResourceListView — which reads the
+      // store — would render `count: 0` columns (blank/white) while the
+      // layout still thinks it is in resource mode. Identity compare is enough:
+      // the `resources` prop is memoized upstream and only changes reference
+      // when its contents change, so steady-state swipes still hit the skip.
+      const resourcesSame = cached.resources === resources;
+      const offsetMs = offset * 86400000;
+      const marginMs = offsetMs; // one page of margin on each side
+      if (
+        eventsSame &&
+        tzSame &&
+        ppsSame &&
+        resourcesSame &&
+        minUnix + marginMs >= cached.minUnix &&
+        maxUnix - marginMs <= cached.maxUnix
+      ) {
+        return;
+      }
+      lastProcessed.current = {
+        events,
+        timeZone,
+        pagesPerSide,
+        resources,
+        minUnix,
+        maxUnix,
+      };
 
       const { regular: regularEvents, allDays: allDayEvents } = filterEvents(
         events,
@@ -136,6 +216,8 @@ const EventsProvider: ForwardRefRenderFunction<
           overlap: overlapType === 'overlap',
           minStartDifference,
           resources,
+          overlappingConfig,
+          availableWidth: columnWidth,
         });
       });
 
@@ -190,6 +272,8 @@ const EventsProvider: ForwardRefRenderFunction<
       overlapType,
       minStartDifference,
       firstDay,
+      overlappingConfig,
+      columnWidth,
     ]
   );
 
@@ -302,10 +386,21 @@ export const useRegularEvents = (
   const selectorByDate = useCallback(
     (state: EventsState) => {
       const data: PackedEvent[] = [];
-      const totalDays = numberOfDays === 1 ? 1 : 7;
-      for (let i = 0; i < totalDays; i++) {
-        const dateUnix = parseDateTime(date).plus({ days: i }).toMillis();
-        if (visibleDays[dateUnix]) {
+      const visibleDaysKeys = Object.keys(visibleDays);
+
+      // If we have explicit visible days, use them directly
+      if (visibleDaysKeys.length > 0) {
+        visibleDaysKeys.forEach((dateUnixStr) => {
+          const events = state.regularEvents[Number(dateUnixStr)];
+          if (events) {
+            data.push(...events);
+          }
+        });
+      } else {
+        // Fallback to original sequential logic
+        const totalDays = numberOfDays === 1 ? 1 : 7;
+        for (let i = 0; i < totalDays; i++) {
+          const dateUnix = parseDateTime(date).plus({ days: i }).toMillis();
           const events = state.regularEvents[dateUnix];
           if (events) {
             data.push(...events);

@@ -73,6 +73,10 @@ export type DragEventContextProps = {
   isDraggingCreateAnim: SharedValue<boolean>;
   isDragging: boolean;
   dragX: SharedValue<number>;
+  isPendingConfirmation: SharedValue<boolean>;
+  requireDragConfirmation: boolean | Array<'edit' | 'create' | 'selected'>;
+  allowDragToOtherResources: boolean;
+  resourceDragBounds: SharedValue<{ minX: number; maxX: number }>;
 };
 
 const DragEventContext = React.createContext<DragEventContextProps | undefined>(
@@ -99,6 +103,8 @@ export type DragEventActionsContextProps = {
     props: DateOrDateTime,
     event: GestureResponderEvent
   ) => void;
+  confirmDrag: () => void;
+  cancelDrag: () => void;
 };
 
 const DragEventActionsContext = React.createContext<
@@ -118,6 +124,8 @@ const DragEventProvider: FC<
     defaultDuration: number;
     hapticService: HapticService;
     resources?: ResourceItem[];
+    requireDragConfirmation: boolean | Array<'edit' | 'create' | 'selected'>;
+    allowDragToOtherResources: boolean;
   }>
 > = ({
   children,
@@ -128,7 +136,21 @@ const DragEventProvider: FC<
   defaultDuration,
   hapticService,
   resources,
+  requireDragConfirmation,
+  allowDragToOtherResources,
 }) => {
+  // Helper to check if a specific mode requires confirmation
+  const requiresConfirmation = useCallback(
+    (mode: 'edit' | 'create' | 'selected'): boolean => {
+      if (requireDragConfirmation === true) return true;
+      if (requireDragConfirmation === false) return false;
+      if (Array.isArray(requireDragConfirmation)) {
+        return requireDragConfirmation.includes(mode);
+      }
+      return false;
+    },
+    [requireDragConfirmation]
+  );
   // Contexts
   const { timeZone } = useTimezone();
   const {
@@ -147,14 +169,15 @@ const DragEventProvider: FC<
     timelineHeight,
     verticalListRef,
     minuteHeight,
+    zoomScale,
     calendarGridWidth,
     visibleDateUnixAnim,
     visibleDateUnix,
     dayBarListRef,
     enableResourceScroll,
     resourcePerPage,
-    resourcePagingEnabled,
     linkedScrollGroup,
+    daySnapOffsets,
   } = useCalendar();
   const {
     onDragSelectedEventStart,
@@ -164,12 +187,22 @@ const DragEventProvider: FC<
     onDragCreateEventStart,
     onDragCreateEventEnd,
     onLongPressEvent,
+    onDragEventPending,
+    onDragSelectedEventPending,
+    onDragCreateEventPending,
   } = useActions();
 
   const isDraggingAnim = useSharedValue(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isDraggingCreate, setIsDraggingCreate] = useState(false);
   const [draggingEvent, setDraggingEvent] = useState<DraggingEventType>();
+  const isPendingConfirmation = useSharedValue(false);
+
+  // Store pending drag data for confirmation
+  const pendingDragData = useRef<{
+    updatedEvent: Record<string, any>;
+    dragType: 'selected' | 'regular' | 'create';
+  } | null>(null);
 
   const dragStartUnix = useSharedValue<number>(-1);
   const dragStartMinutes = useSharedValue<number>(-1);
@@ -178,6 +211,10 @@ const DragEventProvider: FC<
   const roundedDragStartMinutes = useSharedValue<number>(-1);
   const roundedDragDuration = useSharedValue<number>(-1);
   const dragX = useSharedValue<number>(-1);
+  const resourceDragBounds = useSharedValue<{ minX: number; maxX: number }>({
+    minX: -1,
+    maxX: -1,
+  });
 
   const extraMinutes = useSharedValue(0);
   const dragSelectedType = useSharedValue<
@@ -225,16 +262,32 @@ const DragEventProvider: FC<
 
     let resourceId = draggingEvent?.resourceId;
     if (resources?.length) {
-      const totalResources = enableResourceScroll
-        ? resourcePerPage
-        : resources.length;
-      const width = columnWidth / totalResources;
-      const startIndex = enableResourceScroll
-        ? Math.round(offsetX.value / width)
-        : 0;
-      const resourceColumn = Math.floor((dragX.value - hourWidth) / width);
-      const resourceIndex = startIndex + resourceColumn;
-      resourceId = resources[resourceIndex]?.id;
+      if (enableResourceScroll) {
+        const totalResources = resources.length;
+        const resourceWidth = columnWidth / resourcePerPage;
+
+        // offsetX tracks position across all date-resource items
+        const firstVisibleItemIndex = Math.floor(offsetX.value / resourceWidth);
+        const firstVisibleResourceInDay =
+          firstVisibleItemIndex % totalResources;
+
+        // Calculate which resource column the dragX is in
+        const resourceColumn = Math.floor(
+          (dragX.value - hourWidth) / resourceWidth
+        );
+        let resourceIndex = firstVisibleResourceInDay + resourceColumn;
+
+        // Handle wrap-around
+        if (resourceIndex >= totalResources) {
+          resourceIndex = resourceIndex % totalResources;
+        }
+
+        resourceId = resources[resourceIndex]?.id;
+      } else {
+        const width = columnWidth / resources.length;
+        const resourceColumn = Math.floor((dragX.value - hourWidth) / width);
+        resourceId = resources[resourceColumn]?.id;
+      }
     }
 
     return { newStartUnix, newEndUnix, resourceId };
@@ -292,6 +345,7 @@ const DragEventProvider: FC<
   const resetDragState = () => {
     setDraggingEvent(undefined);
     setIsDraggingCreate(false);
+    pendingDragData.current = null;
     runOnUI(() => {
       dragStartUnix.value = -1;
       dragDuration.value = -1;
@@ -303,8 +357,34 @@ const DragEventProvider: FC<
       roundedDragDuration.value = -1;
       extraMinutes.value = 0;
       isDraggingSelectedEvent.value = false;
+      isPendingConfirmation.value = false;
+      resourceDragBounds.value = { minX: -1, maxX: -1 };
     })();
   };
+
+  const confirmDrag = useCallback(async () => {
+    if (!pendingDragData.current) {
+      return;
+    }
+
+    const { updatedEvent, dragType } = pendingDragData.current;
+
+    try {
+      if (dragType === 'selected') {
+        await onDragSelectedEventEnd?.(updatedEvent as SelectedEventType);
+      } else if (dragType === 'create') {
+        await onDragCreateEventEnd?.(updatedEvent as OnCreateEventResponse);
+      } else {
+        await onDragEventEnd?.(updatedEvent as OnEventResponse);
+      }
+    } finally {
+      resetDragState();
+    }
+  }, [onDragSelectedEventEnd, onDragCreateEventEnd, onDragEventEnd]);
+
+  const cancelDrag = useCallback(() => {
+    resetDragState();
+  }, []);
 
   const handleIsDraggingChange = async (dragging: boolean) => {
     if (!dragging) {
@@ -318,23 +398,90 @@ const DragEventProvider: FC<
         resourceId
       );
 
+      // Determine which mode and if it requires confirmation
+      let mode: 'edit' | 'create' | 'selected';
       if (selectedEventId) {
-        const shouldUpdate = shouldUpdateEvent(
-          draggingEvent,
-          newStartUnix,
-          newEndUnix,
-          resourceId
-        );
-        if (shouldUpdate) {
-          await onDragSelectedEventEnd?.(updatedEvent as SelectedEventType);
-        }
+        mode = 'selected';
       } else if (isDraggingCreate) {
-        await onDragCreateEventEnd?.(updatedEvent as OnCreateEventResponse);
+        mode = 'create';
       } else {
-        await onDragEventEnd?.(updatedEvent as OnEventResponse);
+        mode = 'edit';
       }
 
-      resetDragState();
+      const needsConfirmation = requiresConfirmation(mode);
+
+      if (needsConfirmation) {
+        // Enter pending confirmation state
+        isPendingConfirmation.value = true;
+
+        if (selectedEventId) {
+          const shouldUpdate = shouldUpdateEvent(
+            draggingEvent,
+            newStartUnix,
+            newEndUnix,
+            resourceId
+          );
+          if (shouldUpdate) {
+            pendingDragData.current = {
+              updatedEvent,
+              dragType: 'selected',
+            };
+            onDragSelectedEventPending?.(
+              updatedEvent as SelectedEventType,
+              {
+                confirm: confirmDrag,
+                cancel: cancelDrag,
+              }
+            );
+          } else {
+            // No change, just reset
+            resetDragState();
+          }
+        } else if (isDraggingCreate) {
+          pendingDragData.current = {
+            updatedEvent,
+            dragType: 'create',
+          };
+          onDragCreateEventPending?.(
+            updatedEvent as OnCreateEventResponse,
+            {
+              confirm: confirmDrag,
+              cancel: cancelDrag,
+            }
+          );
+        } else {
+          pendingDragData.current = {
+            updatedEvent,
+            dragType: 'regular',
+          };
+          onDragEventPending?.(
+            updatedEvent as OnEventResponse,
+            {
+              confirm: confirmDrag,
+              cancel: cancelDrag,
+            }
+          );
+        }
+      } else {
+        // Original behavior - immediately call callbacks and reset
+        if (selectedEventId) {
+          const shouldUpdate = shouldUpdateEvent(
+            draggingEvent,
+            newStartUnix,
+            newEndUnix,
+            resourceId
+          );
+          if (shouldUpdate) {
+            await onDragSelectedEventEnd?.(updatedEvent as SelectedEventType);
+          }
+        } else if (isDraggingCreate) {
+          await onDragCreateEventEnd?.(updatedEvent as OnCreateEventResponse);
+        } else {
+          await onDragEventEnd?.(updatedEvent as OnEventResponse);
+        }
+
+        resetDragState();
+      }
     }
 
     setIsDragging(dragging);
@@ -518,46 +665,94 @@ const DragEventProvider: FC<
       return;
     }
 
-    const resourceWidth = columnWidth / resourcePerPage;
-    const totalResources = resources?.length ?? 0;
-    const maxOffset = (totalResources - resourcePerPage) * resourceWidth;
-    const shouldCancel = isNextPage
-      ? offsetX.value === maxOffset
-      : offsetX.value === 0;
-
-    if (shouldCancel) {
+    if (!daySnapOffsets || daySnapOffsets.length === 0 || !resources) {
       return;
     }
 
     const scrollInterval = () => {
       const scrollTargetDiff = Math.abs(scrollTargetX.value - offsetX.value);
       const hasScrolledToTarget = scrollTargetDiff < 2;
+
       if (!hasScrolledToTarget) {
         return;
       }
 
-      let nextOffset = 0;
-      const reverse = isNextPage ? 1 : -1;
-      if (resourcePagingEnabled) {
-        nextOffset = offsetX.value + columnWidth * reverse;
-      } else {
-        nextOffset = offsetX.value + resourceWidth * reverse;
+      // Find current snap offset index
+      const currentOffset = offsetX.value;
+      let currentSnapIndex = daySnapOffsets.findIndex(
+        (offset) => Math.abs(offset - currentOffset) < 2
+      );
+
+      // If not at a snap point, find the nearest one
+      if (currentSnapIndex === -1) {
+        currentSnapIndex = daySnapOffsets.reduce((nearestIdx, offset, idx) => {
+          const currentNearest = daySnapOffsets[nearestIdx];
+          return Math.abs(offset - currentOffset) <
+            Math.abs(currentNearest - currentOffset)
+            ? idx
+            : nearestIdx;
+        }, 0);
       }
 
-      const isCancel = isNextPage ? nextOffset > maxOffset : nextOffset < 0;
-      if (isCancel) {
+      // Calculate next snap index
+      const nextSnapIndex = isNextPage
+        ? currentSnapIndex + 1
+        : currentSnapIndex - 1;
+
+      // Check if next snap index is valid
+      if (nextSnapIndex < 0 || nextSnapIndex >= daySnapOffsets.length) {
         clearInterval(autoHScrollTimer.current);
         autoHScrollTimer.current = undefined;
         return;
       }
 
+      const nextOffset = daySnapOffsets[nextSnapIndex];
+      if (nextOffset === undefined) {
+        clearInterval(autoHScrollTimer.current);
+        autoHScrollTimer.current = undefined;
+        return;
+      }
+
+      // Determine if we're transitioning to a new day
+      const resourceWidth = calendarGridWidth / resourcePerPage;
+      const totalResources = resources.length;
+      const currentItemIndex = Math.floor(currentOffset / resourceWidth);
+      const nextItemIndex = Math.floor(nextOffset / resourceWidth);
+      const currentDayIndex = Math.floor(currentItemIndex / totalResources);
+      const nextDayIndex = Math.floor(nextItemIndex / totalResources);
+
       linkedScrollGroup.setActiveId(ScrollType.calendarGrid);
-      runOnUI(() => {
-        scrollTargetX.value = nextOffset;
-        scrollTo(dayBarListRef, nextOffset, 0, true);
-        scrollTo(gridListRef, nextOffset, 0, true);
-        offsetX.value = nextOffset;
-      })();
+
+      if (currentDayIndex !== nextDayIndex) {
+        // Day transition - update visible date and dragStartUnix
+        const visibleDates = calendarData.visibleDatesArray;
+        const nextDateUnix = visibleDates[nextDayIndex];
+
+        if (!nextDateUnix) {
+          clearInterval(autoHScrollTimer.current);
+          autoHScrollTimer.current = undefined;
+          return;
+        }
+
+        triggerDateChanged.current = nextDateUnix;
+
+        runOnUI(() => {
+          scrollTargetX.value = nextOffset;
+          scrollTo(dayBarListRef, nextOffset, 0, true);
+          scrollTo(gridListRef, nextOffset, 0, true);
+          dragStartUnix.value = nextDateUnix;
+          roundedDragStartUnix.value = nextDateUnix;
+          offsetX.value = nextOffset;
+        })();
+      } else {
+        // Same day - just scroll
+        runOnUI(() => {
+          scrollTargetX.value = nextOffset;
+          scrollTo(dayBarListRef, nextOffset, 0, true);
+          scrollTo(gridListRef, nextOffset, 0, true);
+          offsetX.value = nextOffset;
+        })();
+      }
     };
 
     autoHScrollTimer.current = setInterval(
@@ -569,6 +764,9 @@ const DragEventProvider: FC<
   useAnimatedReaction(
     () => dragPosition.value.x,
     (curX, prevX) => {
+      // Skip horizontal auto-scroll when dragging is locked to resource
+      const isLockedToResource = !allowDragToOtherResources && !!resources;
+
       if (
         isDraggingAnim.value &&
         curX !== prevX &&
@@ -576,8 +774,43 @@ const DragEventProvider: FC<
         dragSelectedType.value !== 'top' &&
         dragSelectedType.value !== 'bottom'
       ) {
+        if (isLockedToResource) {
+          runOnJS(_stopAutoHScroll)();
+          return;
+        }
+
         const isAtLeftEdge = curX <= hourWidth - 10;
-        const width = columnWidth * numberOfDays + hourWidth;
+        const width = enableResourceScroll
+          ? calendarGridWidth + hourWidth
+          : columnWidth * numberOfDays + hourWidth;
+        const isAtRightEdge = width - curX <= 24;
+        const isStartAutoScroll = isAtLeftEdge || isAtRightEdge;
+
+        if (isStartAutoScroll) {
+          if (enableResourceScroll) {
+            runOnJS(_startAutoResourceScroll)(isAtRightEdge);
+          } else {
+            runOnJS(_startAutoHScroll)(isAtRightEdge);
+          }
+        } else {
+          runOnJS(_stopAutoHScroll)();
+        }
+      } else if (
+        isDraggingAnim.value &&
+        isDraggingCreateAnim.value &&
+        curX !== prevX &&
+        curX !== -1
+      ) {
+        if (isLockedToResource) {
+          runOnJS(_stopAutoHScroll)();
+          return;
+        }
+
+        // For drag-to-create, always allow horizontal auto-scroll regardless of dragSelectedType
+        const isAtLeftEdge = curX <= hourWidth - 10;
+        const width = enableResourceScroll
+          ? calendarGridWidth + hourWidth
+          : columnWidth * numberOfDays + hourWidth;
         const isAtRightEdge = width - curX <= 24;
         const isStartAutoScroll = isAtLeftEdge || isAtRightEdge;
 
@@ -600,6 +833,10 @@ const DragEventProvider: FC<
       columnWidth,
       calendarData,
       enableResourceScroll,
+      daySnapOffsets,
+      resources,
+      resourcePerPage,
+      allowDragToOtherResources,
     ]
   );
 
@@ -609,7 +846,8 @@ const DragEventProvider: FC<
     }
 
     const scrollInterval = () => {
-      const maxOffsetY = timelineHeight.value - scrollVisibleHeightAnim.value;
+      const maxOffsetY =
+        timelineHeight.value * zoomScale.value - scrollVisibleHeightAnim.value;
       const targetOffset = isAtTopEdge
         ? Math.max(0, offsetY.value - offsetYAnim.value)
         : Math.min(offsetY.value + offsetYAnim.value, maxOffsetY);
@@ -620,7 +858,7 @@ const DragEventProvider: FC<
             initialDragState.value;
 
           const diffY = targetOffset - offsetY.value;
-          const minutes = diffY / minuteHeight.value;
+          const minutes = diffY / (minuteHeight.value * zoomScale.value);
           if (dragSelectedType.value === 'bottom') {
             const nextDuration = Math.max(
               dragStep,
@@ -718,12 +956,29 @@ const DragEventProvider: FC<
             (resource) => resource.id === initialDrag.resourceId
           );
           if (resourceIndex !== -1) {
+            const totalResources = resources.length;
             const resourceWidth = columnWidth / resourcePerPage;
-            const currentResourceIndex = Math.round(
+
+            // offsetX tracks position across all date-resource items
+            const firstVisibleItemIndex = Math.floor(
               offsetX.value / resourceWidth
             );
-            const diff = resourceIndex - currentResourceIndex;
-            dragX.value = diff * resourceWidth + hourWidth + 1;
+            const firstVisibleResourceInDay =
+              firstVisibleItemIndex % totalResources;
+
+            let resourceVisualIndex = resourceIndex - firstVisibleResourceInDay;
+            if (resourceVisualIndex < 0) {
+              resourceVisualIndex += totalResources;
+            }
+
+            dragX.value = hourWidth + resourceVisualIndex * resourceWidth + 1;
+
+            // Set resource bounds for drag constraint
+            if (!allowDragToOtherResources) {
+              const minX = hourWidth + resourceVisualIndex * resourceWidth;
+              const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+              resourceDragBounds.value = { minX, maxX };
+            }
           }
         } else if (
           initialDrag.resourceIndex !== undefined &&
@@ -732,6 +987,13 @@ const DragEventProvider: FC<
           const totalResources = resources.length;
           const eventWidth = columnWidth / totalResources;
           dragX.value = initialDrag.resourceIndex * eventWidth + hourWidth + 1;
+
+          // Set resource bounds for drag constraint
+          if (!allowDragToOtherResources) {
+            const minX = hourWidth + initialDrag.resourceIndex * eventWidth;
+            const maxX = minX + eventWidth - 1; // -1 to stay within current column
+            resourceDragBounds.value = { minX, maxX };
+          }
         }
       }
       runOnUI(() => {
@@ -799,6 +1061,8 @@ const DragEventProvider: FC<
       roundedDragStartUnix,
       selectedEvent,
       visibleDateUnixAnim,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
@@ -829,12 +1093,40 @@ const DragEventProvider: FC<
             (resource) => resource.id === event.resourceId
           ) ?? -1;
         if (resourceIndex !== -1) {
+          const totalResources = resources?.length ?? 0;
           const resourceWidth = columnWidth / resourcePerPage;
-          const currentResourceIndex = Math.round(
+
+          // offsetX tracks position across all date-resource items
+          const firstVisibleItemIndex = Math.floor(
             offsetX.value / resourceWidth
           );
-          const diff = resourceIndex - currentResourceIndex;
-          newDragX = diff * resourceWidth + hourWidth + 1;
+          const firstVisibleResourceInDay =
+            firstVisibleItemIndex % totalResources;
+
+          let resourceVisualIndex = resourceIndex - firstVisibleResourceInDay;
+          if (resourceVisualIndex < 0) {
+            resourceVisualIndex += totalResources;
+          }
+
+          newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
+
+          // Set resource bounds for drag constraint
+          if (!allowDragToOtherResources) {
+            const minX = hourWidth + resourceVisualIndex * resourceWidth;
+            const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+            resourceDragBounds.value = { minX, maxX };
+          }
+        }
+      } else if (event?.resourceId && resources) {
+        // Non-scroll resource mode
+        const resourceIndex = resources.findIndex(
+          (resource) => resource.id === event.resourceId
+        );
+        if (resourceIndex !== -1 && !allowDragToOtherResources) {
+          const resourceWidth = columnWidth / resources.length;
+          const minX = hourWidth + resourceIndex * resourceWidth;
+          const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+          resourceDragBounds.value = { minX, maxX };
         }
       }
       dragX.value = newDragX;
@@ -908,13 +1200,13 @@ const DragEventProvider: FC<
       visibleDateUnixAnim,
       dragStartUnix,
       roundedDragStartUnix,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
   const triggerDragCreateEvent = useCallback(
     (props: DateOrDateTime, event?: GestureResponderEvent) => {
-      console.log(props);
-
       if (!event?.nativeEvent?.locationX) {
         return;
       }
@@ -922,9 +1214,6 @@ const DragEventProvider: FC<
       let newDragX = event.nativeEvent.locationX + hourWidth;
 
       if (enableResourceScroll) {
-        const currentResourceIndex = Math.round(
-          offsetX.value / (columnWidth / resourcePerPage)
-        );
         const selectedResourceIndex =
           resources?.findIndex(
             (resource) => resource.id === props.resourceId
@@ -932,9 +1221,55 @@ const DragEventProvider: FC<
         if (selectedResourceIndex === -1) {
           return;
         }
-        const diff = selectedResourceIndex - currentResourceIndex;
-        newDragX = diff * (columnWidth / resourcePerPage) + hourWidth + 1;
+        const totalResources = resources?.length ?? 0;
+        const resourceWidth = columnWidth / resourcePerPage;
+
+        // Use Math.round instead of Math.floor so that a scroll offset that is
+        // fractionally below the snap target (common on Android, where the final
+        // onScroll event fires just before the snap settles) still resolves to
+        // the correct page index rather than the previous one.
+        const firstVisibleItemIndex = Math.round(offsetX.value / resourceWidth);
+
+        // The item index within a day (modulo by total resources per day)
+        const firstVisibleResourceInDay =
+          firstVisibleItemIndex % totalResources;
+
+        // Calculate visual position of selected resource relative to viewport
+        let resourceVisualIndex =
+          selectedResourceIndex - firstVisibleResourceInDay;
+
+        // Handle wrap-around if needed
+        if (resourceVisualIndex < 0) {
+          resourceVisualIndex += totalResources;
+        }
+
+        // Clamp to the visible page width
+        resourceVisualIndex = Math.min(
+          Math.max(0, resourceVisualIndex),
+          resourcePerPage - 1
+        );
+
+        newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
+
+        // Set resource bounds for drag constraint
+        if (!allowDragToOtherResources) {
+          const minX = hourWidth + resourceVisualIndex * resourceWidth;
+          const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+          resourceDragBounds.value = { minX, maxX };
+        }
+      } else if (props.resourceId && resources) {
+        // Non-scroll resource mode
+        const selectedResourceIndex = resources.findIndex(
+          (resource) => resource.id === props.resourceId
+        );
+        if (selectedResourceIndex !== -1 && !allowDragToOtherResources) {
+          const resourceWidth = columnWidth / resources.length;
+          const minX = hourWidth + selectedResourceIndex * resourceWidth;
+          const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+          resourceDragBounds.value = { minX, maxX };
+        }
       }
+
       dragX.value = newDragX;
       const start = parseDateTime(props.dateTime, { zone: timeZone });
       const startUnix = parseDateTime(start.toISODate()).toMillis();
@@ -949,6 +1284,7 @@ const DragEventProvider: FC<
         start: { dateTime: startISO },
         end: { dateTime: endISO },
       });
+
       if (onDragCreateEventStart) {
         onDragCreateEventStart({
           start: { dateTime: startISO },
@@ -987,6 +1323,8 @@ const DragEventProvider: FC<
       columnWidth,
       resourcePerPage,
       offsetX,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
@@ -1018,6 +1356,10 @@ const DragEventProvider: FC<
       defaultDuration,
       isDraggingCreateAnim,
       dragX,
+      isPendingConfirmation,
+      requireDragConfirmation,
+      allowDragToOtherResources,
+      resourceDragBounds,
     }),
     [
       dragStep,
@@ -1046,6 +1388,10 @@ const DragEventProvider: FC<
       defaultDuration,
       isDraggingCreateAnim,
       dragX,
+      isPendingConfirmation,
+      requireDragConfirmation,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
@@ -1056,6 +1402,8 @@ const DragEventProvider: FC<
       triggerDragCreateEvent: allowDragToCreate
         ? triggerDragCreateEvent
         : undefined,
+      confirmDrag,
+      cancelDrag,
     }),
     [
       allowDragToEdit,
@@ -1063,6 +1411,8 @@ const DragEventProvider: FC<
       triggerDragSelectedEvent,
       allowDragToCreate,
       triggerDragCreateEvent,
+      confirmDrag,
+      cancelDrag,
     ]
   );
 

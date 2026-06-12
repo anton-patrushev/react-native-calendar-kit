@@ -2,160 +2,185 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Gesture } from 'react-native-gesture-handler';
 import type { GestureType } from 'react-native-gesture-handler';
 import {
+  cancelAnimation,
   scrollTo,
-  setNativeProps,
   useSharedValue,
-  withSpring,
 } from 'react-native-reanimated';
 import { useCalendar } from '../context/CalendarProvider';
 import { clampValues } from '../utils/utils';
 import { Platform } from 'react-native';
 
 const SCALE_FACTOR = 0.5;
-const SPRING_DAMPING = 15;
-const SPRING_STIFFNESS = 100;
-const BOUNDARY_PADDING = 8;
+const IS_ANDROID = Platform.OS === 'android';
 
 const usePinchToZoom = () => {
   const {
     verticalListRef,
-    maxTimeIntervalHeight,
-    minTimeIntervalHeight,
-    timeIntervalHeight,
+    timelineHeight,
+    zoomScale,
+    minZoomScale,
+    maxZoomScale,
     offsetY,
     allowPinchToZoom,
+    // Owned by CalendarContainer so the onZoomChange reaction can gate on it.
+    isPinching,
+    scrollVisibleHeightAnim,
   } = useCalendar();
 
-  const startOffsetY = useSharedValue(offsetY.value);
+  // Max reachable scroll for a given zoom: contentHeight - viewport (>= 0).
+  const maxOffsetForZoom = (z: number) => {
+    'worklet';
+    return Math.max(0, timelineHeight.value * z - scrollVisibleHeightAnim.value);
+  };
+
   const pinchGestureRef = useRef<GestureType | undefined>(undefined);
   const startScale = useSharedValue(1);
   const lastScale = useSharedValue(1);
 
+  // Gesture-start snapshots for focal anchoring.
+  const startFocalY = useSharedValue(0);
+  const startOffsetY = useSharedValue(0);
+  const startZoomScale = useSharedValue(1);
+
+  // iOS-only viewport-center anchor translate (APP-5422). iOS freezes the scroll
+  // during the pinch and anchors via this transform (no scrollTo → no shake);
+  // stays 0 on Android, which scrolls for real. See onUpdate.
+  const pinchAnchorTranslate = useSharedValue(0);
+
   const pinchGesture = Gesture.Pinch()
-    .onBegin(() => {
+    .onBegin(({ focalY }) => {
+      // Cancel any in-flight overscroll spring from a previous gesture.
+      cancelAnimation(zoomScale);
       startScale.value = lastScale.value;
+      // Snapshot current state for focal-point anchoring
+      startFocalY.value = focalY;
       startOffsetY.value = offsetY.value;
+      startZoomScale.value = zoomScale.value;
+      pinchAnchorTranslate.value = 0;
+      isPinching.value = true;
     })
     .runOnJS(false)
-    .onUpdate(({ focalY, scale, velocity }) => {
+    .onUpdate(({ scale, velocity }) => {
       if (velocity === 0) {
-        startOffsetY.value = offsetY.value;
         return;
       }
-      // Calculate new scale and height values
-      const newScale = startScale.value * scale;
-      const scaledDiff = (newScale - lastScale.value) * SCALE_FACTOR;
-      const newHeight = timeIntervalHeight.value * (1 + scaledDiff);
-      // Calculate scaling origin point and height difference
-      const scaleOrigin =
-        (focalY + startOffsetY.value) / timeIntervalHeight.value;
-      const heightDiff = newHeight - timeIntervalHeight.value;
-      // Clamp height within allowed bounds
-      const clampedHeight = clampValues(
-        newHeight,
-        minTimeIntervalHeight - BOUNDARY_PADDING,
-        maxTimeIntervalHeight + BOUNDARY_PADDING
+      const oldZoomScale = zoomScale.value;
+      const newGestureScale = startScale.value * scale;
+      const scaledDiff = (newGestureScale - lastScale.value) * SCALE_FACTOR;
+      const newZoomScale = oldZoomScale * (1 + scaledDiff);
+      // Clamp directly to [min, max] — no overshoot (overshoot bounced on Fabric).
+      const clampedZoomScale = clampValues(
+        newZoomScale,
+        minZoomScale,
+        maxZoomScale
       );
 
-      timeIntervalHeight.value = clampedHeight;
-      if (
-        clampedHeight > minTimeIntervalHeight - BOUNDARY_PADDING &&
-        clampedHeight < maxTimeIntervalHeight + BOUNDARY_PADDING
-      ) {
-        const newOffsetY = startOffsetY.value + heightDiff * scaleOrigin;
-        startOffsetY.value = newOffsetY;
+      zoomScale.value = clampedZoomScale;
+
+      if (IS_ANDROID) {
+        // Android: real per-frame scrollTo, focal-point anchored. Android has no
+        // iOS-Fabric transform/scroll commit race, so the natural finger anchor
+        // is smooth and the scroll is already settled at release (no reconcile).
+        const anchorContentY = startFocalY.value + startOffsetY.value;
+        const anchorFrac =
+          anchorContentY / (timelineHeight.value * startZoomScale.value);
+        const newOffsetY = clampValues(
+          anchorFrac * timelineHeight.value * clampedZoomScale -
+            startFocalY.value,
+          0,
+          maxOffsetForZoom(clampedZoomScale)
+        );
         offsetY.value = newOffsetY;
-        if (typeof setNativeProps === 'function') {
-          setNativeProps(verticalListRef, {
-            contentOffset: { y: newOffsetY, x: 0 },
-          });
-        } else {
-          scrollTo(verticalListRef, 0, newOffsetY, true);
-        }
+        scrollTo(verticalListRef, 0, newOffsetY, false);
+      } else {
+        // iOS: frozen scroll, anchor via transform only (no scrollTo → no shake).
+        // δ keeps the viewport-center content fixed: it solves
+        // a*z + δ - startOffsetY = vh/2 for a = (startOffsetY + vh/2)/startZoom.
+        const vh = scrollVisibleHeightAnim.value;
+        const anchorDelta =
+          startZoomScale.value > 0
+            ? (startOffsetY.value + vh / 2) *
+              (1 - clampedZoomScale / startZoomScale.value)
+            : 0;
+        pinchAnchorTranslate.value = anchorDelta;
       }
-      lastScale.value = newScale;
+      lastScale.value = newGestureScale;
     })
     .onEnd(() => {
-      // When gesture ends, animate to final values within bounds
-      const finalHeight = clampValues(
-        timeIntervalHeight.value,
-        minTimeIntervalHeight,
-        maxTimeIntervalHeight
-      );
-      timeIntervalHeight.value = withSpring(finalHeight, {
-        damping: SPRING_DAMPING,
-        stiffness: SPRING_STIFFNESS,
-      });
-      const scaleFactor = finalHeight / timeIntervalHeight.value;
-      const targetOffset = startOffsetY.value * scaleFactor;
-      offsetY.value = targetOffset;
-      if (typeof setNativeProps === 'function') {
-        setNativeProps(verticalListRef, {
-          contentOffset: { y: targetOffset, x: 0 },
-        });
-      } else {
-        scrollTo(verticalListRef, 0, targetOffset, true);
+      // Android scroll tracked live — already settled, nothing to reconcile.
+      if (IS_ANDROID) {
+        lastScale.value = 1;
+        startScale.value = 1;
+        return;
       }
-      // Reset scale values
+      // iOS: commit the frozen scroll to the anchored position (startOffsetY - δ,
+      // clamped to range) and clear δ.
+      const z = zoomScale.value;
+      const delta = pinchAnchorTranslate.value;
+      const targetScroll = clampValues(
+        startOffsetY.value - delta,
+        0,
+        maxOffsetForZoom(z)
+      );
+      offsetY.value = targetScroll;
+      pinchAnchorTranslate.value = 0;
+      scrollTo(verticalListRef, 0, targetScroll, false);
       lastScale.value = 1;
       startScale.value = 1;
+    })
+    .onFinalize(() => {
+      isPinching.value = false;
     })
     .enabled(allowPinchToZoom)
     .withRef(pinchGestureRef);
 
+  // Web ctrl+wheel zoom
   const containerRef = useRef<HTMLElement | null>(null);
   const onWheel = useCallback(
     (event: WheelEvent) => {
       if (event.ctrlKey) {
         event.preventDefault();
 
-        // More stable scale calculation
         const scaleDelta = -event.deltaY * 0.01;
-        const newScale = Math.max(0.1, lastScale.value + scaleDelta);
+        const newGestureScale = Math.max(0.1, lastScale.value + scaleDelta);
 
-        // Get container bounds for proper focal point calculation
         const containerBounds = containerRef.current?.getBoundingClientRect();
         const containerTop = containerBounds?.top || 0;
         const focalY = event.clientY - containerTop;
 
-        // Calculate height change based on scale difference
-        const scaleFactor = newScale / lastScale.value;
-        const newHeight = timeIntervalHeight.value * scaleFactor;
+        const scaleFactor = newGestureScale / lastScale.value;
+        const newZoomScale = zoomScale.value * scaleFactor;
 
-        // Clamp height within allowed bounds
-        const clampedHeight = clampValues(
-          newHeight,
-          minTimeIntervalHeight,
-          maxTimeIntervalHeight
+        const clampedZoomScale = clampValues(
+          newZoomScale,
+          minZoomScale,
+          maxZoomScale
         );
 
-        // Only update if within bounds
-        if (clampedHeight !== timeIntervalHeight.value) {
-          const heightDiff = clampedHeight - timeIntervalHeight.value;
+        if (clampedZoomScale !== zoomScale.value) {
+          const anchorFrac =
+            (focalY + offsetY.value) /
+            (timelineHeight.value * zoomScale.value);
 
-          // Calculate scaling origin point relative to current scroll position
-          const scaleOrigin =
-            (focalY + offsetY.value) / timeIntervalHeight.value;
+          zoomScale.value = clampedZoomScale;
+          const newOffsetY =
+            anchorFrac * timelineHeight.value * clampedZoomScale - focalY;
 
-          // Adjust scroll position to maintain focal point
-          const newOffsetY = offsetY.value + heightDiff * scaleOrigin;
-
-          timeIntervalHeight.value = clampedHeight;
           offsetY.value = newOffsetY;
-
           scrollTo(verticalListRef, 0, newOffsetY, false);
         }
 
-        lastScale.value = newScale;
+        lastScale.value = newGestureScale;
       }
     },
     [
       lastScale,
       offsetY,
-      timeIntervalHeight,
+      zoomScale,
+      timelineHeight,
       verticalListRef,
-      minTimeIntervalHeight,
-      maxTimeIntervalHeight,
+      minZoomScale,
+      maxZoomScale,
     ]
   );
 
@@ -172,7 +197,12 @@ const usePinchToZoom = () => {
     };
   }, [onWheel, verticalListRef]);
 
-  return { pinchGesture, pinchGestureRef };
+  return {
+    pinchGesture,
+    pinchGestureRef,
+    isPinching,
+    pinchAnchorTranslate,
+  };
 };
 
 export default usePinchToZoom;

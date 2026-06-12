@@ -1,40 +1,41 @@
-import React, {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { forwardRef, useCallback, useMemo, useRef } from 'react';
 import {
   GestureResponderEvent,
-  LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  ScrollView,
   View,
 } from 'react-native';
-import Animated, {
-  AnimatedRef,
-  runOnJS,
-  useAnimatedReaction,
-  useAnimatedRef,
-  useScrollViewOffset,
-} from 'react-native-reanimated';
+import Animated, { AnimatedRef } from 'react-native-reanimated';
 import { ResourceItem } from '../../types';
-import { ResourceContainer } from './ResourceContainers';
+import { CalendarList, CalendarListRef } from '../../service/CalendarList';
+
+export interface DateResourceItem {
+  date: number;
+  resource: ResourceItem;
+}
 
 export interface ResourceListViewProps {
   animatedRef?: AnimatedRef<Animated.ScrollView>;
   width: number;
   height: number;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollEndDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onMomentumScrollBegin?: (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => void;
+  onMomentumScrollEnd?: (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => void;
   resources?: ResourceItem[];
+  items?: DateResourceItem[];
   resourcePerPage: number;
   drawDistance?: number;
   renderItem: (item: {
     items: ResourceItem[];
     index: number;
+    isDayEnd?: boolean;
+    isDayStart?: boolean;
   }) => React.ReactNode;
   pagingEnabled?: boolean;
   scrollEnabled?: boolean;
@@ -45,13 +46,14 @@ export interface ResourceListViewProps {
   onTouchStart?: (event: GestureResponderEvent) => void;
   scrollEventThrottle?: number;
   onWheel?: (event: WheelEvent) => void;
+  snapToOffsets?: number[];
+  onScrollOffsetChange?: (offset: number) => void;
+  initialOffset?: number;
 }
 
 export interface ResourceListViewRef {
   setVisibleDate: (date: number) => void;
 }
-
-const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 
 const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
   (
@@ -59,9 +61,14 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
       width,
       height,
       onScroll,
+      onScrollBeginDrag,
+      onScrollEndDrag,
+      onMomentumScrollBegin,
+      onMomentumScrollEnd,
       resources,
+      items,
       resourcePerPage,
-      drawDistance = width * 2,
+      drawDistance,
       renderItem,
       pagingEnabled = false,
       renderOverlay,
@@ -69,117 +76,154 @@ const ResourceListView = forwardRef<Animated.ScrollView, ResourceListViewProps>(
       onTouchStart,
       scrollEventThrottle = 16,
       onWheel,
+      snapToOffsets,
+      onScrollOffsetChange,
+      initialOffset = 0,
     },
     ref
   ) => {
-    const [viewportWidth, setViewportWidth] = useState(0);
-    const [scrollOffset, setScrollOffset] = useState(0);
-    const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const calendarListRef = useRef<CalendarListRef>(null);
 
-    const count = Math.ceil((resources?.length ?? 0) / resourcePerPage);
+    const isDualAxisMode = !!items;
 
-    const totalSize = (resources?.length ?? 0) * (width / resourcePerPage);
-    const snapToInterval = width / resourcePerPage;
+    const itemsLength = items?.length ?? resources?.length ?? 0;
+    const count = isDualAxisMode
+      ? itemsLength
+      : Math.ceil(itemsLength / resourcePerPage);
 
-    const visibleRange = useMemo(() => {
-      if (viewportWidth === 0 || count === 0) {
-        return { start: 0, end: 0 };
-      }
+    const itemWidth = width / resourcePerPage;
+    const itemSize = isDualAxisMode ? itemWidth : width;
+    const totalSize = isDualAxisMode
+      ? itemsLength * itemWidth
+      : itemsLength * itemWidth;
 
-      const buffer = drawDistance;
-      const scrollStart = Math.max(0, scrollOffset - buffer);
-      const scrollEnd = scrollOffset + viewportWidth + buffer;
-      const startIndex = Math.max(0, Math.floor(scrollStart / width));
-      const endIndex = Math.min(count - 1, Math.floor(scrollEnd / width));
-      return { start: startIndex, end: endIndex };
-    }, [count, scrollOffset, viewportWidth, drawDistance, width]);
-
-    const animScrollRef = useAnimatedRef<Animated.ScrollView>();
-    const scrollOffsetAnim = useScrollViewOffset(animScrollRef);
-
-    const throttledSetScrollOffset = useCallback((offset: number) => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      scrollTimeoutRef.current = setTimeout(() => {
-        setScrollOffset(offset);
-      }, 16);
-    }, []);
-
-    useAnimatedReaction(
-      () => scrollOffsetAnim.value,
-      (offset) => {
-        runOnJS(throttledSetScrollOffset)(offset);
-      }
-    );
-
-    useEffect(() => {
-      return () => {
-        if (scrollTimeoutRef.current) {
-          clearTimeout(scrollTimeoutRef.current);
+    const _renderItem = useCallback(
+      ({ item: index }: { item: number }) => {
+        if (isDualAxisMode && items) {
+          const dateResourceItem = items[index];
+          if (!dateResourceItem) {
+            return null;
+          }
+          const nextItem = items[index + 1];
+          const prevItem = index > 0 ? items[index - 1] : undefined;
+          const isDayEnd = !!nextItem && nextItem.date !== dateResourceItem.date;
+          const isDayStart = !!prevItem && prevItem.date !== dateResourceItem.date;
+          return renderItem({
+            items: [dateResourceItem.resource],
+            index,
+            isDayEnd,
+            isDayStart,
+          });
         }
-      };
-    }, []);
 
-    const handleLayout = useCallback((event: LayoutChangeEvent) => {
-      const { width: viewWidth } = event.nativeEvent.layout;
-      setViewportWidth(viewWidth);
-    }, []);
+        if (!resources) {
+          return null;
+        }
 
-    const getItemPosition = useCallback(
-      (index: number) => {
-        return index * width;
+        const startIndex = index * resourcePerPage;
+        const endIndex = Math.min(
+          startIndex + resourcePerPage,
+          resources.length
+        );
+        const pageResources = resources.slice(startIndex, endIndex);
+
+        if (pageResources.length === 0) {
+          return null;
+        }
+
+        return renderItem({
+          items: pageResources,
+          index,
+        });
       },
-      [width]
+      [isDualAxisMode, items, resources, resourcePerPage, renderItem]
     );
+
+    const keyExtractor = useCallback(
+      (item: number) => {
+        if (isDualAxisMode && items) {
+          const dateResourceItem = items[item];
+          if (!dateResourceItem) {
+            return `item-${item}`;
+          }
+          return `${dateResourceItem.date}-${dateResourceItem.resource.id}`;
+        }
+        return `page-${item}`;
+      },
+      [isDualAxisMode, items]
+    );
+
+    const handleVisibleColumnChanged = useCallback(
+      (props: { offset: number }) => {
+        onScrollOffsetChange?.(props.offset);
+      },
+      [onScrollOffsetChange]
+    );
+
+    const snapToInterval = useMemo(() => {
+      if (snapToOffsets) {
+        return undefined;
+      }
+      if (isDualAxisMode) {
+        return itemWidth;
+      }
+      if (pagingEnabled) {
+        return undefined;
+      }
+      return itemWidth;
+    }, [snapToOffsets, isDualAxisMode, itemWidth, pagingEnabled]);
+
+    const effectiveDrawDistance = drawDistance ?? width * 3;
+
+    const overlayElement = useMemo(() => {
+      if (!renderOverlay) {
+        return null;
+      }
+      return (
+        <View
+          id="overlay-view"
+          style={{
+            position: 'absolute',
+            height,
+            width: totalSize,
+            zIndex: 999,
+          }}
+          pointerEvents="box-none">
+          {renderOverlay({ totalSize, resources: resources ?? [] })}
+        </View>
+      );
+    }, [renderOverlay, height, totalSize, resources]);
 
     return (
-      <AnimatedScrollView
-        ref={(node) => {
-          if (node) {
-            if (typeof ref === 'function') {
-              ref(node as any);
-            } else if (ref) {
-              (ref as any).current = node;
-            }
-            animScrollRef(node as any);
-          }
-        }}
-        horizontal
-        onScroll={onScroll}
-        onLayout={handleLayout}
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-        snapToInterval={pagingEnabled ? undefined : snapToInterval}
-        pagingEnabled={pagingEnabled}
-        disableIntervalMomentum={!pagingEnabled}
-        scrollEnabled={scrollEnabled}
-        scrollEventThrottle={scrollEventThrottle}
-        onTouchStart={onTouchStart}
-        {...{ onWheel }}
-        style={{ height }}>
-        <View style={{ width: totalSize, height: '100%' }}>
-          <ResourceContainer
-            resources={resources}
-            resourcePerPage={resourcePerPage}
-            itemSize={width}
-            visibleRange={visibleRange}
-            totalSize={totalSize}
-            getItemPosition={getItemPosition}
-            renderItem={renderItem}
-          />
-          {!!renderOverlay && (
-            <View
-              id="overlay-view"
-              style={[
-                { position: 'absolute', height, width: totalSize, zIndex: 999 },
-              ]}
-              pointerEvents="box-none">
-              {renderOverlay({ totalSize, resources: resources ?? [] })}
-            </View>
-          )}
-        </View>
-      </AnimatedScrollView>
+      <View style={{ height, position: 'relative' }}>
+        <CalendarList
+          ref={calendarListRef}
+          animatedRef={ref as AnimatedRef<Animated.ScrollView>}
+          count={count}
+          renderItem={_renderItem}
+          keyExtractor={keyExtractor}
+          itemSize={itemSize}
+          drawDistance={effectiveDrawDistance}
+          onScroll={onScroll}
+          onScrollBeginDrag={onScrollBeginDrag}
+          onScrollEndDrag={onScrollEndDrag}
+          onMomentumScrollBegin={onMomentumScrollBegin}
+          onMomentumScrollEnd={onMomentumScrollEnd}
+          style={{ height }}
+          initialOffset={initialOffset}
+          pagingEnabled={isDualAxisMode ? false : pagingEnabled}
+          snapToInterval={snapToInterval}
+          snapToOffsets={snapToOffsets}
+          columnsPerPage={isDualAxisMode ? 1 : resourcePerPage}
+          onVisibleColumnChanged={handleVisibleColumnChanged}
+          scrollEventThrottle={scrollEventThrottle}
+          scrollEnabled={scrollEnabled}
+          onTouchStart={onTouchStart}
+          onWheel={onWheel}
+          decelerationRate="fast"
+        />
+        {overlayElement}
+      </View>
     );
   }
 );
