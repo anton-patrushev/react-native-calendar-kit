@@ -770,6 +770,9 @@ export interface EventItem extends Record<string, any> {
 
   /** Resource ID for the event. */
   resourceId?: string;
+
+  /** Whether this event can be dragged when drag-to-edit is enabled. Default: true */
+  draggable?: boolean;
 }
 
 export interface HighlightDateProps {

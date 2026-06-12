@@ -51,6 +51,9 @@ const Events: FC<{
       if (!event.start.dateTime || !event.end.dateTime) {
         return;
       }
+      if (event.draggable === false) {
+        return;
+      }
 
       const eventStart = forceUpdateZone(
         event._internal.startUnix,

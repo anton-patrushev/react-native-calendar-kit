@@ -231,6 +231,9 @@ const EventItem: FC<EventItemProps> = ({
   };
 
   const _onLongPressEvent = (resEvent: GestureResponderEvent) => {
+    if (eventInput.draggable === false) {
+      return;
+    }
     onLongPressEvent!(eventInput, resEvent);
   };
 
