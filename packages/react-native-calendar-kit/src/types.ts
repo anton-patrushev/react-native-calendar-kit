@@ -551,6 +551,13 @@ export interface CalendarProviderProps extends ActionsProviderProps {
   defaultDuration?: number;
 
   /**
+   * Show end time label when dragging
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
+
+  /**
    * Determines how events that overlap in time are displayed.
    *
    * - 'no-overlap': Events will be displayed side by side without overlapping.
@@ -902,6 +909,13 @@ export interface CalendarBodyProps {
    * Note: Please use `useCallback` to memoize the function
    */
   renderDraggingHour?: (props: RenderHourProps) => React.ReactElement | null;
+
+  /**
+   * Show end time label when dragging
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
 
   /** Show now indicator */
   showNowIndicator?: boolean;

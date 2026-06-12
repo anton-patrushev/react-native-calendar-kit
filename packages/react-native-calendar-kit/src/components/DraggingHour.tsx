@@ -23,9 +23,10 @@ const selectTheme = (state: ThemeConfigs) => ({
 
 interface DraggingHourProps {
   renderHour?: (props: RenderHourProps) => React.ReactNode;
+  showEndTime?: boolean;
 }
 
-const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour }) => {
+const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour, showEndTime = true }) => {
   const { hourTextColor, hourTextStyle, draggingTextColor } =
     useTheme(selectTheme);
   const fontSize = hourTextStyle?.fontSize ?? 10;
@@ -107,36 +108,38 @@ const DraggingHourInner: FC<DraggingHourProps> = ({ renderHour }) => {
           </Text>
         )}
       </Animated.View>
-      <Animated.View
-        pointerEvents="box-none"
-        style={[
-          styles.absolute,
-          { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
-          endAnimStyle,
-        ]}>
-        {renderHour ? (
-          renderHour({
-            hourStr: endHourStr,
-            minutes: endMinutes,
-            style,
-          })
-        ) : (
-          <Text style={[style, { color: draggingTextColor }]}>
-            {endHourStr}
-          </Text>
-        )}
-      </Animated.View>
+      {showEndTime && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={[
+            styles.absolute,
+            { width: hourWidth - HOUR_SHORT_LINE_WIDTH - 8 - lineWidth },
+            endAnimStyle,
+          ]}>
+          {renderHour ? (
+            renderHour({
+              hourStr: endHourStr,
+              minutes: endMinutes,
+              style,
+            })
+          ) : (
+            <Text style={[style, { color: draggingTextColor }]}>
+              {endHourStr}
+            </Text>
+          )}
+        </Animated.View>
+      )}
     </>
   );
 };
 
-const DraggingHour: FC<DraggingHourProps> = ({ renderHour }) => {
+const DraggingHour: FC<DraggingHourProps> = ({ renderHour, showEndTime }) => {
   const { isDragging } = useDragEvent();
   if (!isDragging) {
     return null;
   }
 
-  return <DraggingHourInner renderHour={renderHour} />;
+  return <DraggingHourInner renderHour={renderHour} showEndTime={showEndTime} />;
 };
 
 export default DraggingHour;
