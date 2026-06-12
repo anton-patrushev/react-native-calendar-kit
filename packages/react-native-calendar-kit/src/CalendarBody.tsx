@@ -16,6 +16,7 @@ import BodyResourceItem from './components/BodyResourceItem';
 import CalendarListView from './components/CalendarListView';
 import DragEventPlaceholder from './components/DraggingEvent';
 import DraggingHour from './components/DraggingHour';
+import TappedSlotIndicator from './components/TappedSlotIndicator';
 import { NowIndicatorResource } from './components/NowIndicator';
 import ResourceListView from './components/Resource/ResourceListView';
 import ResourceOverlay from './components/Resource/ResourceOverlay';
@@ -27,6 +28,7 @@ import { BodyContext } from './context/BodyContext';
 import { useCalendar } from './context/CalendarProvider';
 import { useResources } from './context/EventsProvider';
 import { useLocale } from './context/LocaleProvider';
+import { useTapFeedback } from './context/TapFeedbackContext';
 import useDragEventGesture from './hooks/useDragEventGesture';
 import useDragToCreateGesture from './hooks/useDragToCreateGesture';
 import usePinchToZoom from './hooks/usePinchToZoom';
@@ -47,6 +49,7 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
   showTimeColumnRightLine = true,
   showQuarterHourLines = false,
   showDraggingEndTime = true,
+  tapFeedbackBorderColor = 'rgba(0,0,0,0.3)',
   renderCustomOutOfRange,
   renderCustomUnavailableHour,
   renderEvent,
@@ -440,6 +443,10 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
                   <DraggingHour
                     renderHour={renderDraggingHour}
                     showEndTime={showDraggingEndTime}
+                  />
+                  <TappedSlotIndicator
+                    resources={resources}
+                    borderColor={tapFeedbackBorderColor}
                   />
                 </View>
               </View>
