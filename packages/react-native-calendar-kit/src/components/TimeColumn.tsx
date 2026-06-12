@@ -72,7 +72,7 @@ const TimeColumn = () => {
             ]}>
             {children}
           </Animated.View>
-          <View
+          <Animated.View
             style={[
               styles.absolute,
               styles.shortLine,
@@ -80,6 +80,7 @@ const TimeColumn = () => {
                 backgroundColor: cellBorderColor,
                 width: HOUR_SHORT_LINE_WIDTH,
               },
+              counterScaleStyle,
             ]}
           />
         </View>
