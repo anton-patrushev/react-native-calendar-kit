@@ -15,6 +15,12 @@ import { dateTimeToISOString, parseDateTime } from '../utils/dateUtils';
 // the rate under ~13/sec even at gesture-frame speed.
 const HAPTIC_MIN_GAP_MS = 80;
 
+// Settling window for onDateChanged emission. Shared by BOTH arm sites
+// (column-change path and drag-end path below) on the same timer ref —
+// the windows replace each other rather than stack, so retuning this
+// value retunes every emission path in lockstep.
+const DATE_EMISSION_DEBOUNCE_MS = 150;
+
 const useSyncedList = ({ id }: { id: ScrollType }) => {
   const {
     visibleDateUnix,
@@ -43,6 +49,69 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const lastHapticAt = useRef(0);
+
+  // Slow-swipe emission gap: a slow drag crosses the column boundary
+  // mid-gesture, so the debounce below expires while the finger is still
+  // down — neither `triggerDateChanged` nor `isPendingDateChanged` is set
+  // and the emission is swallowed. A zero-velocity release then produces
+  // no momentum phase (or one too short to change the rounded column
+  // again), so nothing ever re-arms the timer and `onDateChanged` never
+  // fires for the swipe. Re-arm on drag end when the visible date has
+  // diverged from the last notified one. `isDragging` is deliberately
+  // left untouched: with a normal momentum release this handler is a
+  // no-op gap-filler and the original begin-drag → momentum-begin flow
+  // still drives the emission; a later column change clears this timer
+  // and re-arms its own.
+  //
+  // The emission is deferred (same window, same timer ref as the main
+  // debounce — never stacked) rather than fired synchronously because
+  // at drag-end JS cannot yet tell whether a momentum phase will
+  // follow; an immediate emit would double-fire when momentum carries
+  // the scroll across another boundary. The window also lets the snap
+  // settle — the timer re-reads the visible date at fire time.
+  //
+  // Wiring note: this handler reaches the ScrollView only because
+  // CalendarBody/CalendarHeader spread `{...scrollProps}` into their
+  // list views. If those call sites ever switch to explicit props,
+  // `onScrollEndDrag` must be wired explicitly or this fix dies
+  // silently.
+  const onScrollEndDrag = useCallback(() => {
+    const activeId = linkedScrollGroup.getActiveId() || ScrollType.calendarGrid;
+    if (activeId !== id.toString()) {
+      return;
+    }
+
+    if (visibleDateUnix.current === currentUnix) {
+      return;
+    }
+
+    isPendingDateChanged.current = true;
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = setTimeout(() => {
+      const latestDate = visibleDateUnix.current;
+      if (latestDate === currentUnix) {
+        isPendingDateChanged.current = false;
+        return;
+      }
+      if (isPendingDateChanged.current) {
+        const dateIsoStr = dateTimeToISOString(parseDateTime(latestDate));
+        triggerDateChanged.current = undefined;
+        onDateChanged?.(dateIsoStr);
+        notifyDateChanged(latestDate);
+      }
+      isPendingDateChanged.current = false;
+    }, DATE_EMISSION_DEBOUNCE_MS);
+  }, [
+    linkedScrollGroup,
+    id,
+    visibleDateUnix,
+    currentUnix,
+    triggerDateChanged,
+    onDateChanged,
+    notifyDateChanged,
+  ]);
 
   const onVisibleColumnChanged = useCallback(
     (props: {
@@ -139,7 +208,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
             notifyDateChanged(currentDate);
           }
           isPendingDateChanged.current = false;
-        }, 150);
+        }, DATE_EMISSION_DEBOUNCE_MS);
       }
     },
     [
@@ -159,6 +228,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
 
   return {
     onScrollBeginDrag,
+    onScrollEndDrag,
     onMomentumScrollBegin,
     onVisibleColumnChanged,
   };
