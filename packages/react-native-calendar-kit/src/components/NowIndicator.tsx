@@ -119,7 +119,7 @@ export const NowIndicatorResource = () => {
 export default React.memo(NowIndicator);
 
 const styles = StyleSheet.create({
-  container: { position: 'absolute' },
+  container: { position: 'absolute', zIndex: 1 },
   line: {
     position: 'absolute',
     height: 2,
