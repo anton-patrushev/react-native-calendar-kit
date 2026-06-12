@@ -10,8 +10,10 @@ import React, {
 import { PixelRatio } from 'react-native';
 import type Animated from 'react-native-reanimated';
 import {
+  runOnJS,
   runOnUI,
   scrollTo,
+  useAnimatedReaction,
   useAnimatedRef,
   useDerivedValue,
   useSharedValue,
@@ -112,6 +114,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     maxTimeIntervalHeight = 124,
     minTimeIntervalHeight = 60,
     allowPinchToZoom = false,
+    onZoomChange,
     initialTimeIntervalHeight = 60,
     timeZone: initialTimeZone,
     showWeekNumber = false,
@@ -352,6 +355,22 @@ const CalendarContainer: React.ForwardRefRenderFunction<
     () => totalSlots * timeIntervalHeight.value + 1 + extraHeight
   );
   const startOffset = useDerivedValue(() => start * minuteHeight.value);
+
+  // Emit zoom percentage changes via callback
+  useAnimatedReaction(
+    () => {
+      const range = maxTimeIntervalHeight - minTimeIntervalHeight;
+      if (range === 0) return 0;
+      return Math.round(
+        ((timeIntervalHeight.value - minTimeIntervalHeight) / range) * 100
+      );
+    },
+    (zoomPercent, prevZoomPercent) => {
+      if (onZoomChange && zoomPercent !== prevZoomPercent) {
+        runOnJS(onZoomChange)(zoomPercent);
+      }
+    }
+  );
 
   const goToDate = useLatestCallback((props?: GoToDateOptions) => {
     const date = parseDateTime(props?.date, { zone: timeZone });

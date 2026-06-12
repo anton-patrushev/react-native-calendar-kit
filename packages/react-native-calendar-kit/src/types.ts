@@ -441,6 +441,13 @@ export interface CalendarProviderProps extends ActionsProviderProps {
   /** Enable pinch to scale height of the calendar */
   allowPinchToZoom?: boolean;
 
+  /**
+   * Callback when zoom level changes.
+   * Provides zoom percentage (0-100) where 0 is min zoom, 100 is max zoom.
+   * Useful for adjusting UI based on zoom level (e.g., showing 15-min intervals when zoomed in).
+   */
+  onZoomChange?: (zoomPercent: number) => void;
+
   /** Custom time zone */
   timeZone?: string;
 
@@ -922,6 +929,14 @@ export interface CalendarBodyProps {
 
   /** Show right bar of the TimeColumn component */
   showTimeColumnRightLine?: boolean;
+
+  /**
+   * Show quarter-hour lines (15 min intervals) on the calendar grid.
+   * When enabled, lines appear at :15 and :45 in addition to :00 and :30.
+   *
+   * Default: `false`
+   */
+  showQuarterHourLines?: boolean;
 
   /** Custom Out of Range item
    *

@@ -33,6 +33,7 @@ export interface BodyContextProps {
   timeInterval: number;
   showNowIndicator: boolean;
   showTimeColumnRightLine: boolean;
+  showQuarterHourLines: boolean;
   columnWidth: number;
   isRTL: boolean;
   columns: number;
