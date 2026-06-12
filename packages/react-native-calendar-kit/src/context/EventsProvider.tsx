@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useImperativeHandle,
+  useRef,
 } from 'react';
 import { DEFAULT_MIN_START_DIFFERENCE } from '../constants';
 import useLazyRef from '../hooks/useLazyRef';
@@ -104,6 +105,28 @@ const EventsProvider: ForwardRefRenderFunction<
   ).current;
   const currentStartDate = useDateChangedListener();
 
+  // Tracks the input set the cached event store was built against. When
+  // a date-change-only useEffect re-runs with a new center date but the
+  // events prop reference, timezone and other range-shape inputs haven't
+  // changed AND the new center is still inside the cached window minus
+  // a one-page margin, we skip the heavy recompute. notifyDataChanged is
+  // O(events * processing) — when a consumer has hundreds of events the
+  // recompute alone can block JS for ~50-100ms, which compounds during a
+  // fast horizontal swipe and drops JS FPS toward 0.
+  const lastProcessed = useRef<{
+    events: EventItem[] | undefined;
+    timeZone: string | undefined;
+    pagesPerSide: number | undefined;
+    minUnix: number;
+    maxUnix: number;
+  }>({
+    events: undefined,
+    timeZone: undefined,
+    pagesPerSide: undefined,
+    minUnix: 0,
+    maxUnix: 0,
+  });
+
   const notifyDataChanged = useCallback(
     (date: number, offset: number = defaultOffset) => {
       const zonedDate = forceUpdateZone(date, timeZone);
@@ -113,6 +136,37 @@ const EventsProvider: ForwardRefRenderFunction<
       const maxUnix = zonedDate
         .plus({ days: offset * (pagesPerSide + 1) })
         .toMillis();
+
+      // Skip the heavy recompute when nothing relevant changed AND the
+      // new center is still inside the cached window with at least one
+      // page of margin on each side. Without this gate, swiping across
+      // adjacent days re-runs the full event-processing pipeline (event
+      // filter + occurrence expansion + overlap packing for every day in
+      // the window) — easily 50-100ms per call on a typical core-mobile
+      // event load, which compounds with each column boundary and tanks
+      // JS FPS during fast scroll.
+      const cached = lastProcessed.current;
+      const eventsSame = cached.events === events;
+      const tzSame = cached.timeZone === timeZone;
+      const ppsSame = cached.pagesPerSide === pagesPerSide;
+      const offsetMs = offset * 86400000;
+      const marginMs = offsetMs; // one page of margin on each side
+      if (
+        eventsSame &&
+        tzSame &&
+        ppsSame &&
+        minUnix + marginMs >= cached.minUnix &&
+        maxUnix - marginMs <= cached.maxUnix
+      ) {
+        return;
+      }
+      lastProcessed.current = {
+        events,
+        timeZone,
+        pagesPerSide,
+        minUnix,
+        maxUnix,
+      };
 
       const { regular: regularEvents, allDays: allDayEvents } = filterEvents(
         events,

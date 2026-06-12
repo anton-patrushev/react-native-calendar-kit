@@ -10,7 +10,7 @@ import {
 import { useRegularEvents } from '../context/EventsProvider';
 import { useTimezone } from '../context/TimeZoneProvider';
 import type { PackedEvent, ResourceItem } from '../types';
-import { forceUpdateZone, parseDateTime } from '../utils/dateUtils';
+import { parseDateTime } from '../utils/dateUtils';
 import EventItem from './EventItem';
 
 const Events: FC<{

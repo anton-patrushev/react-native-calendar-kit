@@ -72,21 +72,10 @@ const TimeColumn = () => {
             ]}>
             {children}
           </Animated.View>
-          <Animated.View
-            style={[
-              styles.absolute,
-              styles.shortLine,
-              {
-                backgroundColor: cellBorderColor,
-                width: HOUR_SHORT_LINE_WIDTH,
-              },
-              counterScaleStyle,
-            ]}
-          />
         </View>
       );
     },
-    [cellBorderColor, counterScaleStyle, renderHour, style, totalSlots]
+    [counterScaleStyle, renderHour, style, totalSlots]
   );
 
   const halfHourElements = useMemo(() => {

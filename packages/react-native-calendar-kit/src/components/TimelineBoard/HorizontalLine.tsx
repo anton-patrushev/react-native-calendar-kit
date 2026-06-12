@@ -1,7 +1,5 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import Animated from 'react-native-reanimated';
-import { useBody } from '../../context/BodyContext';
 
 interface HorizontalLineProps {
   borderColor: string;
@@ -13,25 +11,25 @@ interface HorizontalLineProps {
   }) => React.ReactNode;
 }
 
+// Phase 1 perf: counter-scale removed. 1px horizontal divider visually
+// stretches to ~zoomScale px at high zoom; not worth a per-line
+// useAnimatedStyle + native commit per frame.
 const HorizontalLine = ({
   index,
   borderColor,
   totalSlots,
   renderCustomHorizontalLine,
 }: HorizontalLineProps) => {
-  const { counterScaleStyle } = useBody();
-
   return (
-    <Animated.View
+    <View
       pointerEvents="box-none"
       style={[
         styles.horizontalLine,
         !renderCustomHorizontalLine ? { backgroundColor: borderColor } : {},
         { top: `${(index / totalSlots) * 100}%` },
-        counterScaleStyle,
       ]}>
       {renderCustomHorizontalLine?.({ index, borderColor })}
-    </Animated.View>
+    </View>
   );
 };
 export default HorizontalLine;

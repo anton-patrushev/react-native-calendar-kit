@@ -43,14 +43,12 @@ export const TapFeedbackProvider: React.FC<TapFeedbackProviderProps> = ({
     (slot: TappedSlot) => {
       if (!enabled) return;
 
-      // Clear any existing timeout
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
 
       setTappedSlot(slot);
 
-      // Auto-hide after delay
       timeoutRef.current = setTimeout(() => {
         setTappedSlot(null);
         timeoutRef.current = null;
@@ -59,7 +57,6 @@ export const TapFeedbackProvider: React.FC<TapFeedbackProviderProps> = ({
     [enabled]
   );
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (timeoutRef.current) {
@@ -87,7 +84,6 @@ export const TapFeedbackProvider: React.FC<TapFeedbackProviderProps> = ({
 export const useTapFeedback = (): TapFeedbackContextValue => {
   const context = useContext(TapFeedbackContext);
   if (!context) {
-    // Return a no-op context when not wrapped in provider
     return {
       tappedSlot: null,
       showTapFeedback: () => {},

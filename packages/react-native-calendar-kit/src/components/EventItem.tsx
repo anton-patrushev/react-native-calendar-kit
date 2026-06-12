@@ -7,7 +7,10 @@ import {
   Pressable,
   type GestureResponderEvent,
 } from 'react-native';
-import Animated, { useDerivedValue } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useDerivedValue,
+} from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY } from '../constants';
 import { useBody } from '../context/BodyContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -243,6 +246,24 @@ const EventItem: FC<EventItemProps> = ({
 
   const eventWidthAnim = useDerivedValue(() => eventWidth, [eventWidth]);
 
+  // Counter the parent scaleY's effect on borderRadius. The base radius
+  // honours the consumer's `theme.eventContainerStyle.borderRadius` when
+  // provided (so theming flows through) and falls back to the library
+  // default of 2. Layout radius shrinks as zoom grows so the vertical
+  // visual radius stays at the base value. RN can't express asymmetric
+  // X/Y radii, so the horizontal radius flattens slightly at high zoom.
+  const baseBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? ((theme.eventContainerStyle as { borderRadius: number }).borderRadius)
+      : 2;
+  // Static base radius — no per-event animated counter-scale. At high
+  // zoom the corner curve elongates slightly along Y (RN can't express
+  // asymmetric X/Y radii under scaleY), which is a tiny visual artifact
+  // accepted in exchange for eliminating N per-event transform commits
+  // per pinch frame.
+  const borderRadiusStyle = { borderRadius: baseBorderRadius };
+
   // Compute overlap border style
   const overlapBorderStyle = useMemo(() => {
     // Show border only for stacked events (stackLevel > 0)
@@ -293,13 +314,14 @@ const EventItem: FC<EventItemProps> = ({
         onPress={onPressEvent ? _onPressEvent : undefined}
         onLongPress={onLongPressEvent ? _onLongPressEvent : undefined}>
         {({ pressed }) => (
-          <View
+          <Animated.View
             style={[
               styles.contentContainer,
               { backgroundColor: event.color },
               theme.eventContainerStyle,
               overlapBorderStyle,
               { opacity },
+              borderRadiusStyle,
             ]}>
             {renderEvent ? (
               renderEvent(eventInput, {
@@ -308,7 +330,12 @@ const EventItem: FC<EventItemProps> = ({
                 zoomScale,
               })
             ) : (
-              <Animated.View style={counterScaleStyle}>
+              // transformOrigin: 'top' anchors the counter-scaled title to
+              // the top edge of the event block. Default center origin
+              // shrinks the title around its own center, so at zoom > 1 the
+              // title drifts ~titleHeight*(z-1)/2 below the block top.
+              <Animated.View
+                style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
                 <Text
                   style={[
                     styles.title,
@@ -321,7 +348,7 @@ const EventItem: FC<EventItemProps> = ({
             )}
             {/* Dark overlay for pressed state - darkens card without transparency */}
             {pressed && <View style={styles.pressedOverlay} />}
-          </View>
+          </Animated.View>
         )}
       </Pressable>
     </View>

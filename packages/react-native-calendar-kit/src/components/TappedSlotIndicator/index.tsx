@@ -23,9 +23,10 @@ const styles = StyleSheet.create({
   innerBox: {
     flex: 1,
     marginHorizontal: 1,
-    borderWidth: 2,
-    borderRadius: 4,
+    borderLeftWidth: 2,
+    borderRightWidth: 2,
     borderStyle: 'solid',
+    // borderRadius supplied by outlineBorderStyle (animated by zoom).
   },
 });
 
@@ -60,6 +61,7 @@ const TappedSlotIndicatorInner = memo(
       columns,
       enableResourceScroll,
       resourcePerPage,
+      zoomScale,
     } = useBody();
 
     const { startMinutes, durationMinutes, dateUnix } = tappedSlot!;
@@ -69,6 +71,7 @@ const TappedSlotIndicatorInner = memo(
 
     const resourceIndex = useMemo(
       () => getResourceIndexById(tappedSlot!.resourceId, resources),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       [tappedSlot!.resourceId, resources]
     );
 
@@ -106,6 +109,15 @@ const TappedSlotIndicatorInner = memo(
       resourceIndex,
     ]);
 
+    // Counter-scale top/bottom border widths so the outline stays 2px thick
+    // at any zoom while preserving borderRadius. Indicator is short-lived so
+    // co-occurrence with active pinch is unlikely.
+    const outlineBorderStyle = useAnimatedStyle(() => ({
+      borderTopWidth: 2 / zoomScale.value,
+      borderBottomWidth: 2 / zoomScale.value,
+      borderRadius: 4 / zoomScale.value,
+    }));
+
     return (
       <Animated.View
         entering={FadeIn.duration(150)}
@@ -113,14 +125,13 @@ const TappedSlotIndicatorInner = memo(
         style={[styles.container, animatedStyle]}
         pointerEvents="none"
       >
-        <View
+        <Animated.View
           style={[
             styles.innerBox,
-            {
-              backgroundColor: 'transparent',
-              borderColor,
-            },
+            { borderColor, backgroundColor: 'transparent' },
+            outlineBorderStyle,
           ]}
+          pointerEvents="none"
         />
       </Animated.View>
     );

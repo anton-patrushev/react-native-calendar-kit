@@ -1,5 +1,4 @@
 import { useCallback, useRef } from 'react';
-import { runOnUI } from 'react-native-reanimated';
 import { MILLISECONDS_IN_DAY, ScrollType } from '../constants';
 import { useActions } from '../context/ActionsProvider';
 import { useCalendar } from '../context/CalendarProvider';
@@ -8,6 +7,13 @@ import {
   useNotifyDateChanged,
 } from '../context/VisibleDateProvider';
 import { dateTimeToISOString, parseDateTime } from '../utils/dateUtils';
+
+// Minimum gap between selection haptics during a horizontal swipe.
+// Without this, a fast swipe across N day columns fires N native
+// haptic calls back-to-back, contributing JS-thread work that visibly
+// drops scroll FPS on Fabric. Eighty ms feels lively while keeping
+// the rate under ~13/sec even at gesture-frame speed.
+const HAPTIC_MIN_GAP_MS = 80;
 
 const useSyncedList = ({ id }: { id: ScrollType }) => {
   const {
@@ -36,6 +42,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
   }, []);
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastHapticAt = useRef(0);
 
   const onVisibleColumnChanged = useCallback(
     (props: {
@@ -61,12 +68,24 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
           const diffDays = Math.floor(
             (visibleEnd - visibleStart) / MILLISECONDS_IN_DAY
           );
+          // Skip write when structurally equal — avoids waking any
+          // useAnimatedReaction consumer of visibleWeeks per scroll
+          // column when the week range hasn't actually changed.
+          const prev = visibleWeeks.value;
           if (diffDays <= 7) {
-            visibleWeeks.value = [visibleStart];
+            if (prev.length !== 1 || prev[0] !== visibleStart) {
+              visibleWeeks.value = [visibleStart];
+            }
           } else {
             const nextWeekStart = visibleDates[pageIndex * columns + 7];
             if (nextWeekStart) {
-              visibleWeeks.value = [visibleStart, nextWeekStart];
+              if (
+                prev.length !== 2 ||
+                prev[0] !== visibleStart ||
+                prev[1] !== nextWeekStart
+              ) {
+                visibleWeeks.value = [visibleStart, nextWeekStart];
+              }
             }
           }
         }
@@ -82,13 +101,25 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
         }
 
         if (visibleDateUnix.current !== currentDate) {
-          hapticService.selection();
-          const dateIsoStr = dateTimeToISOString(parseDateTime(currentDate));
-          onChange?.(dateIsoStr);
+          // Haptic is throttled — see HAPTIC_MIN_GAP_MS comment.
+          const now = Date.now();
+          if (now - lastHapticAt.current >= HAPTIC_MIN_GAP_MS) {
+            lastHapticAt.current = now;
+            hapticService.selection();
+          }
+          // Defer the ISO string allocation: only build it when a JS
+          // consumer is actually listening on onChange. Cuts per-column
+          // luxon work to zero for the common case (consumers usually
+          // only listen on onDateChanged, which is debounced below).
+          if (onChange) {
+            onChange(dateTimeToISOString(parseDateTime(currentDate)));
+          }
           visibleDateUnix.current = currentDate;
-          runOnUI(() => {
-            visibleDateUnixAnim.value = currentDate;
-          })();
+          // Direct shared-value assignment from JS thread. Reanimated
+          // propagates it to UI consumers next worklet tick. Avoids the
+          // closure allocation and scheduling overhead of
+          // `runOnUI(() => { sv.value = x })()` per column change.
+          visibleDateUnixAnim.value = currentDate;
         }
 
         debounceTimer.current = setTimeout(() => {

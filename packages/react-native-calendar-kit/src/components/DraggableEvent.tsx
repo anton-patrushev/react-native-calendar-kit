@@ -57,8 +57,14 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
       };
     }, [])
   );
-  const { minuteHeight, columnWidth, start, numberOfDays, counterScaleStyle } =
-    useBody();
+  const {
+    minuteHeight,
+    columnWidth,
+    start,
+    numberOfDays,
+    counterScaleStyle,
+    zoomScale,
+  } = useBody();
   const {
     dragStartUnix,
     dragSelectedStartUnix,
@@ -126,6 +132,42 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
     };
   }, [resourceIndex]);
 
+  // Base border width / radius — sourced from consumer's containerStyle
+  // first, then theme.eventContainerStyle, then library defaults. Always
+  // zoom-compensate so the consumer's static value doesn't visibly stretch
+  // at high zoom.
+  const consumerSelectedBorderWidth =
+    typeof (containerStyle as { borderWidth?: number } | undefined)
+      ?.borderWidth === 'number'
+      ? (containerStyle as { borderWidth: number }).borderWidth
+      : undefined;
+  const consumerSelectedBorderRadius =
+    typeof (containerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (containerStyle as { borderRadius: number }).borderRadius
+      : undefined;
+  const themeSelectedBorderRadius =
+    typeof (theme.eventContainerStyle as { borderRadius?: number } | undefined)
+      ?.borderRadius === 'number'
+      ? (theme.eventContainerStyle as { borderRadius: number }).borderRadius
+      : undefined;
+  const baseSelectedWidth = consumerSelectedBorderWidth ?? 3;
+  const baseSelectedRadius =
+    consumerSelectedBorderRadius ?? themeSelectedBorderRadius ?? 4;
+
+  const sideBordersStyle = {
+    borderLeftWidth: baseSelectedWidth,
+    borderRightWidth: baseSelectedWidth,
+  };
+  // Top/bottom widths + borderRadius animate with zoom so their visual
+  // values stay constant. Selecting an event then pinching is rare; this
+  // animated layout prop fires only when zoomScale changes.
+  const outlineBorderStyle = useAnimatedStyle(() => ({
+    borderTopWidth: baseSelectedWidth / zoomScale.value,
+    borderBottomWidth: baseSelectedWidth / zoomScale.value,
+    borderRadius: baseSelectedRadius / zoomScale.value,
+  }));
+
   const gesture = Gesture.Tap()
     .runOnJS(true)
     .onTouchesDown(() => {
@@ -172,12 +214,13 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
         { width: eventWidth, left: startX + left },
         animView,
       ]}>
+      {/* When the consumer provides `containerStyle`, hand visual control
+          fully over to them — see DraggingEvent for the same rationale. */}
       {selectedEvent && (
-        <View
+        <Animated.View
           style={[
             StyleSheet.absoluteFill,
             theme.eventContainerStyle,
-            styles.event,
             {
               backgroundColor:
                 selectedEvent?.color ??
@@ -185,8 +228,13 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
                   ? theme.primaryColor
                   : 'transparent'),
               borderColor: theme.primaryColor,
+              overflow: 'hidden',
             },
             containerStyle,
+            // Apply our computed border widths/radius LAST so they always
+            // win over consumer's shorthand `borderWidth` — see DraggingEvent.
+            sideBordersStyle,
+            outlineBorderStyle,
           ]}>
           {renderEvent ? (
             renderEvent(selectedEvent, {
@@ -194,42 +242,42 @@ export const DraggableEvent: FC<DraggableEventProps> = ({
               height: eventHeight,
             })
           ) : (
-            <Animated.View style={counterScaleStyle}>
+            <Animated.View
+              style={[{ transformOrigin: 'top' }, counterScaleStyle]}>
               <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
                 {selectedEvent.title}
               </Text>
             </Animated.View>
           )}
-        </View>
+        </Animated.View>
       )}
       <GestureDetector gesture={gesture}>
         <View style={[StyleSheet.absoluteFill, { cursor: 'pointer' }]} />
       </GestureDetector>
       <GestureDetector gesture={topEdgeGesture}>
-        {TopEdgeComponent || (
-          <Animated.View
-            style={[
-              styles.dot,
-              styles.dotLeft,
-              numberOfDays === 1 && styles.dotLeftSingle,
-              counterScaleStyle,
-            ]}>
-            <DragDot />
-          </Animated.View>
-        )}
+        {/* Default (center) transformOrigin so counter-scale shrinks around
+            the dot's center — keeps its visual center on the event's
+            top/bottom edge regardless of zoom. */}
+        <Animated.View
+          style={[
+            styles.dot,
+            styles.dotLeft,
+            numberOfDays === 1 && styles.dotLeftSingle,
+            counterScaleStyle,
+          ]}>
+          {TopEdgeComponent || <DragDot />}
+        </Animated.View>
       </GestureDetector>
       <GestureDetector gesture={bottomEdgeGesture}>
-        {BottomEdgeComponent || (
-          <Animated.View
-            style={[
-              styles.dot,
-              styles.dotRight,
-              numberOfDays === 1 && styles.dotRightSingle,
-              counterScaleStyle,
-            ]}>
-            <DragDot />
-          </Animated.View>
-        )}
+        <Animated.View
+          style={[
+            styles.dot,
+            styles.dotRight,
+            numberOfDays === 1 && styles.dotRightSingle,
+            counterScaleStyle,
+          ]}>
+          {BottomEdgeComponent || <DragDot />}
+        </Animated.View>
       </GestureDetector>
     </Animated.View>
   );
@@ -247,9 +295,10 @@ const styles = StyleSheet.create({
     cursor: 'pointer',
   },
   event: {
-    borderRadius: 4,
     overflow: 'hidden',
-    borderWidth: 3,
+    borderLeftWidth: 3,
+    borderRightWidth: 3,
+    // borderRadius supplied by outlineBorderStyle (animated by zoom).
   },
   dotLeft: { top: -12, left: -12 },
   dotRight: { bottom: -12, right: -12 },
