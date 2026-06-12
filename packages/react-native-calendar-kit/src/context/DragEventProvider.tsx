@@ -75,6 +75,8 @@ export type DragEventContextProps = {
   dragX: SharedValue<number>;
   isPendingConfirmation: SharedValue<boolean>;
   requireDragConfirmation: boolean | Array<'edit' | 'create' | 'selected'>;
+  allowDragToOtherResources: boolean;
+  resourceDragBounds: SharedValue<{ minX: number; maxX: number }>;
 };
 
 const DragEventContext = React.createContext<DragEventContextProps | undefined>(
@@ -123,6 +125,7 @@ const DragEventProvider: FC<
     hapticService: HapticService;
     resources?: ResourceItem[];
     requireDragConfirmation: boolean | Array<'edit' | 'create' | 'selected'>;
+    allowDragToOtherResources: boolean;
   }>
 > = ({
   children,
@@ -134,6 +137,7 @@ const DragEventProvider: FC<
   hapticService,
   resources,
   requireDragConfirmation,
+  allowDragToOtherResources,
 }) => {
   // Helper to check if a specific mode requires confirmation
   const requiresConfirmation = useCallback(
@@ -206,6 +210,10 @@ const DragEventProvider: FC<
   const roundedDragStartMinutes = useSharedValue<number>(-1);
   const roundedDragDuration = useSharedValue<number>(-1);
   const dragX = useSharedValue<number>(-1);
+  const resourceDragBounds = useSharedValue<{ minX: number; maxX: number }>({
+    minX: -1,
+    maxX: -1,
+  });
 
   const extraMinutes = useSharedValue(0);
   const dragSelectedType = useSharedValue<
@@ -349,6 +357,7 @@ const DragEventProvider: FC<
       extraMinutes.value = 0;
       isDraggingSelectedEvent.value = false;
       isPendingConfirmation.value = false;
+      resourceDragBounds.value = { minX: -1, maxX: -1 };
     })();
   };
 
@@ -754,6 +763,9 @@ const DragEventProvider: FC<
   useAnimatedReaction(
     () => dragPosition.value.x,
     (curX, prevX) => {
+      // Skip horizontal auto-scroll when dragging is locked to resource
+      const isLockedToResource = !allowDragToOtherResources && !!resources;
+
       if (
         isDraggingAnim.value &&
         curX !== prevX &&
@@ -761,6 +773,11 @@ const DragEventProvider: FC<
         dragSelectedType.value !== 'top' &&
         dragSelectedType.value !== 'bottom'
       ) {
+        if (isLockedToResource) {
+          runOnJS(_stopAutoHScroll)();
+          return;
+        }
+
         const isAtLeftEdge = curX <= hourWidth - 10;
         const width = enableResourceScroll
           ? calendarGridWidth + hourWidth
@@ -783,6 +800,11 @@ const DragEventProvider: FC<
         curX !== prevX &&
         curX !== -1
       ) {
+        if (isLockedToResource) {
+          runOnJS(_stopAutoHScroll)();
+          return;
+        }
+
         // For drag-to-create, always allow horizontal auto-scroll regardless of dragSelectedType
         const isAtLeftEdge = curX <= hourWidth - 10;
         const width = enableResourceScroll
@@ -813,6 +835,7 @@ const DragEventProvider: FC<
       daySnapOffsets,
       resources,
       resourcePerPage,
+      allowDragToOtherResources,
     ]
   );
 
@@ -947,6 +970,13 @@ const DragEventProvider: FC<
             }
 
             dragX.value = hourWidth + resourceVisualIndex * resourceWidth + 1;
+
+            // Set resource bounds for drag constraint
+            if (!allowDragToOtherResources) {
+              const minX = hourWidth + resourceVisualIndex * resourceWidth;
+              const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+              resourceDragBounds.value = { minX, maxX };
+            }
           }
         } else if (
           initialDrag.resourceIndex !== undefined &&
@@ -955,6 +985,13 @@ const DragEventProvider: FC<
           const totalResources = resources.length;
           const eventWidth = columnWidth / totalResources;
           dragX.value = initialDrag.resourceIndex * eventWidth + hourWidth + 1;
+
+          // Set resource bounds for drag constraint
+          if (!allowDragToOtherResources) {
+            const minX = hourWidth + initialDrag.resourceIndex * eventWidth;
+            const maxX = minX + eventWidth - 1; // -1 to stay within current column
+            resourceDragBounds.value = { minX, maxX };
+          }
         }
       }
       runOnUI(() => {
@@ -1022,6 +1059,8 @@ const DragEventProvider: FC<
       roundedDragStartUnix,
       selectedEvent,
       visibleDateUnixAnim,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
@@ -1068,6 +1107,24 @@ const DragEventProvider: FC<
           }
 
           newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
+
+          // Set resource bounds for drag constraint
+          if (!allowDragToOtherResources) {
+            const minX = hourWidth + resourceVisualIndex * resourceWidth;
+            const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+            resourceDragBounds.value = { minX, maxX };
+          }
+        }
+      } else if (event?.resourceId && resources) {
+        // Non-scroll resource mode
+        const resourceIndex = resources.findIndex(
+          (resource) => resource.id === event.resourceId
+        );
+        if (resourceIndex !== -1 && !allowDragToOtherResources) {
+          const resourceWidth = columnWidth / resources.length;
+          const minX = hourWidth + resourceIndex * resourceWidth;
+          const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+          resourceDragBounds.value = { minX, maxX };
         }
       }
       dragX.value = newDragX;
@@ -1141,6 +1198,8 @@ const DragEventProvider: FC<
       visibleDateUnixAnim,
       dragStartUnix,
       roundedDragStartUnix,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
@@ -1181,6 +1240,24 @@ const DragEventProvider: FC<
         }
 
         newDragX = hourWidth + resourceVisualIndex * resourceWidth + 1;
+
+        // Set resource bounds for drag constraint
+        if (!allowDragToOtherResources) {
+          const minX = hourWidth + resourceVisualIndex * resourceWidth;
+          const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+          resourceDragBounds.value = { minX, maxX };
+        }
+      } else if (props.resourceId && resources) {
+        // Non-scroll resource mode
+        const selectedResourceIndex = resources.findIndex(
+          (resource) => resource.id === props.resourceId
+        );
+        if (selectedResourceIndex !== -1 && !allowDragToOtherResources) {
+          const resourceWidth = columnWidth / resources.length;
+          const minX = hourWidth + selectedResourceIndex * resourceWidth;
+          const maxX = minX + resourceWidth - 1; // -1 to stay within current column
+          resourceDragBounds.value = { minX, maxX };
+        }
       }
 
       dragX.value = newDragX;
@@ -1236,6 +1313,8 @@ const DragEventProvider: FC<
       columnWidth,
       resourcePerPage,
       offsetX,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 
@@ -1269,6 +1348,8 @@ const DragEventProvider: FC<
       dragX,
       isPendingConfirmation,
       requireDragConfirmation,
+      allowDragToOtherResources,
+      resourceDragBounds,
     }),
     [
       dragStep,
@@ -1299,6 +1380,8 @@ const DragEventProvider: FC<
       dragX,
       isPendingConfirmation,
       requireDragConfirmation,
+      allowDragToOtherResources,
+      resourceDragBounds,
     ]
   );
 

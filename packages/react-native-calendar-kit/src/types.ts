@@ -689,6 +689,15 @@ export interface CalendarProviderProps extends ActionsProviderProps {
 
   /** Resource paging enabled */
   resourcePagingEnabled?: boolean;
+
+  /**
+   * Allow dragging events to different resource columns.
+   * When set to `false`, events can only be dragged within their original
+   * resource column (locked to same resource).
+   *
+   * Default: `true`
+   */
+  allowDragToOtherResources?: boolean;
 }
 
 export interface ResourceItem extends Record<string, any> {
