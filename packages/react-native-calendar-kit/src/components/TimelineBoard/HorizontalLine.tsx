@@ -1,5 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { useBody } from '../../context/BodyContext';
 
 interface HorizontalLineProps {
   borderColor: string;
@@ -17,16 +19,19 @@ const HorizontalLine = ({
   totalSlots,
   renderCustomHorizontalLine,
 }: HorizontalLineProps) => {
+  const { counterScaleStyle } = useBody();
+
   return (
-    <View
+    <Animated.View
       pointerEvents="box-none"
       style={[
         styles.horizontalLine,
         !renderCustomHorizontalLine ? { backgroundColor: borderColor } : {},
         { top: `${(index / totalSlots) * 100}%` },
+        counterScaleStyle,
       ]}>
       {renderCustomHorizontalLine?.({ index, borderColor })}
-    </View>
+    </Animated.View>
   );
 };
 export default HorizontalLine;

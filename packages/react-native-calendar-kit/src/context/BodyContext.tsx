@@ -68,6 +68,10 @@ export interface BodyContextProps {
     borderStyle: 'solid' | 'dashed' | 'dotted';
     borderColor: string;
   };
+  /** Current zoom scale. Writable — changes during pinch, persists after. */
+  zoomScale: SharedValue<number>;
+  /** Shared counter-scale animated style: { transform: [{ scaleY: 1/zoomScale }] } */
+  counterScaleStyle: { transform: { scaleY: number }[] };
 }
 
 export const BodyContext = React.createContext<BodyContextProps | undefined>(

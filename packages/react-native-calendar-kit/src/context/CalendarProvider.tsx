@@ -67,6 +67,12 @@ export interface CalendarContextProps {
   dateResourceItems?: DateResourceItem[];
   daySnapOffsets?: number[];
   handleResourceScrollOffsetChange?: (offset: number) => void;
+  /** Current zoom scale. Writable — changes during pinch, persists after. */
+  zoomScale: SharedValue<number>;
+  /** Minimum zoom scale: minTimeIntervalHeight / initialTimeIntervalHeight. */
+  minZoomScale: number;
+  /** Maximum zoom scale: maxTimeIntervalHeight / initialTimeIntervalHeight. */
+  maxZoomScale: number;
 }
 
 export const CalendarContext = React.createContext<

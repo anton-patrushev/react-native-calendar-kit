@@ -79,6 +79,8 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     dragToCreateMode,
     enableResourceScroll,
     resourcePerPage,
+    counterScaleStyle,
+    zoomScale,
   } = useBody();
   const {
     dragDuration,
@@ -156,14 +158,15 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     }
 
     return (
-      <View
+      <Animated.View
         style={[
           styles.dot,
           styles.dotLeft,
           numberOfDays === 1 && styles.dotLeftSingle,
+          counterScaleStyle,
         ]}>
         <DragDot />
-      </View>
+      </Animated.View>
     );
   };
 
@@ -177,14 +180,15 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
     }
 
     return (
-      <View
+      <Animated.View
         style={[
           styles.dot,
           styles.dotRight,
           numberOfDays === 1 && styles.dotRightSingle,
+          counterScaleStyle,
         ]}>
         <DragDot />
-      </View>
+      </Animated.View>
     );
   };
 
@@ -201,16 +205,20 @@ export const DraggingEvent: FC<DraggingEventProps> = ({
           },
           containerStyle,
         ]}>
-        {renderEvent
-          ? renderEvent(draggingEvent, {
-              width: eventWidthAnim,
-              height: eventHeight,
-            })
-          : !!draggingEvent?.title && (
+        {renderEvent ? (
+          renderEvent(draggingEvent, {
+            width: eventWidthAnim,
+            height: eventHeight,
+          })
+        ) : (
+          <Animated.View style={counterScaleStyle}>
+            {!!draggingEvent?.title && (
               <Text style={[styles.eventTitle, theme.eventTitleStyle]}>
                 {draggingEvent.title}
               </Text>
             )}
+          </Animated.View>
+        )}
       </View>
       {isShowDot && renderTopEdgeComponent()}
       {isShowDot && renderBottomEdgeComponent()}

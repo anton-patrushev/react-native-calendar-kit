@@ -33,6 +33,7 @@ const NowIndicatorInner = ({
     startOffset,
     columnWidth,
     NowIndicatorComponent,
+    counterScaleStyle,
   } = useBody();
   const nowIndicatorColor = useTheme(
     useCallback((state) => state.nowIndicatorColor || state.colors.primary, [])
@@ -60,16 +61,18 @@ const NowIndicatorInner = ({
         },
         animView,
       ]}>
-      {NowIndicatorComponent || (
-        <View style={styles.lineContainer}>
-          <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
-          {showDot && (
-            <View
-              style={[styles.dot, { backgroundColor: nowIndicatorColor }]}
-            />
-          )}
-        </View>
-      )}
+      <Animated.View style={counterScaleStyle}>
+        {NowIndicatorComponent || (
+          <View style={styles.lineContainer}>
+            <View style={[styles.line, { backgroundColor: nowIndicatorColor }]} />
+            {showDot && (
+              <View
+                style={[styles.dot, { backgroundColor: nowIndicatorColor }]}
+              />
+            )}
+          </View>
+        )}
+      </Animated.View>
     </Animated.View>
   );
 };

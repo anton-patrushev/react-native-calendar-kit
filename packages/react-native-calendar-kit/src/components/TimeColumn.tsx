@@ -24,6 +24,7 @@ const TimeColumn = () => {
     renderHour,
     hourWidth,
     showTimeColumnRightLine,
+    counterScaleStyle,
   } = useBody();
   const { cellBorderColor, hourTextColor, hourTextStyle, hourBackgroundColor } =
     useTheme(selectTimeColumnTheme);
@@ -60,14 +61,15 @@ const TimeColumn = () => {
             styles.absolute,
             { top: `${(index / totalSlots) * 100}%`, width: '100%' },
           ]}>
-          <View
+          <Animated.View
             style={[
               styles.absolute,
               styles.hour,
               { right: HOUR_SHORT_LINE_WIDTH + 8 },
+              counterScaleStyle,
             ]}>
             {children}
-          </View>
+          </Animated.View>
           <View
             style={[
               styles.absolute,
@@ -81,7 +83,7 @@ const TimeColumn = () => {
         </View>
       );
     },
-    [cellBorderColor, renderHour, style, totalSlots]
+    [cellBorderColor, counterScaleStyle, renderHour, style, totalSlots]
   );
 
   const animView = useAnimatedStyle(() => ({

@@ -438,6 +438,13 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    */
   minTimeIntervalHeight?: number;
 
+  /**
+   * Initial zoom scale factor for the calendar.
+   * 1.0 = no zoom (default). Values > 1 zoom in, < 1 zoom out.
+   * Useful for restoring a persisted zoom level.
+   */
+  initialZoomScale?: number;
+
   /** Enable pinch to scale height of the calendar */
   allowPinchToZoom?: boolean;
 
@@ -556,13 +563,6 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * Default is `30` minutes
    */
   defaultDuration?: number;
-
-  /**
-   * Show end time label when dragging
-   *
-   * Default: `true`
-   */
-  showDraggingEndTime?: boolean;
 
   /**
    * Determines how events that overlap in time are displayed.
@@ -712,6 +712,14 @@ export interface CalendarProviderProps extends ActionsProviderProps {
    * Default: `true`
    */
   allowDragToOtherResources?: boolean;
+
+  /**
+   * Show end time label when dragging events.
+   * When set to `false`, only the start time label is shown during drag operations.
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
 
   /**
    * Show visual feedback when tapping on an empty time slot.
@@ -933,13 +941,6 @@ export interface CalendarBodyProps {
    */
   renderDraggingHour?: (props: RenderHourProps) => React.ReactElement | null;
 
-  /**
-   * Show end time label when dragging
-   *
-   * Default: `true`
-   */
-  showDraggingEndTime?: boolean;
-
   /** Show now indicator */
   showNowIndicator?: boolean;
 
@@ -1011,6 +1012,14 @@ export interface CalendarBodyProps {
   NowIndicatorComponent?: React.ReactElement | null;
 
   /**
+   * Show end time label when dragging events.
+   * When set to `false`, only the start time label is shown during drag operations.
+   *
+   * Default: `true`
+   */
+  showDraggingEndTime?: boolean;
+
+  /**
    * Border color for tap feedback indicator.
    *
    * Default: `'rgba(0,0,0,0.3)'`
@@ -1028,6 +1037,19 @@ export interface CalendarBodyProps {
     borderStyle?: 'solid' | 'dashed' | 'dotted';
     borderColor?: string;
   };
+
+  /**
+   * Headless children rendered inside BodyContext.Provider.
+   *
+   * Use this to mount side-effect components that need access to the
+   * BodyContext (e.g. SharedValue capture for zoom persistence) without
+   * being coupled to the CalendarBody component or the
+   * NowIndicatorComponent's lifecycle (which only mounts when today is visible).
+   *
+   * Children are rendered after the calendar grid, so any non-null output
+   * will overlay the calendar.
+   */
+  children?: React.ReactNode;
 }
 
 export interface RenderHourProps {
@@ -1096,5 +1118,18 @@ export interface PackedAllDayEvent extends EventItemInternal {
 
 export interface SizeAnimation {
   width: SharedValue<number>;
+  /**
+   * Layout height at base zoom. Visual height = height * zoomScale.
+   * This value stays constant during pinch — the visual scaling is handled
+   * by a GPU-accelerated scaleY transform on the container.
+   */
   height: SharedValue<number>;
+  /**
+   * Persistent zoom scale factor. 1.0 = initial zoom.
+   * Changes during pinch gesture, persists after gesture ends (NOT reset to 1).
+   *
+   * Consumers should apply `transform: [{ scaleY: 1/zoomScale }]` to content
+   * they don't want vertically stretched by the container's scaleY transform.
+   */
+  zoomScale: SharedValue<number>;
 }
