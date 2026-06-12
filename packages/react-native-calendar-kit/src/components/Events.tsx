@@ -55,14 +55,15 @@ const Events: FC<{
         return;
       }
 
-      const eventStart = forceUpdateZone(
-        event._internal.startUnix,
-        timeZone
-      ).startOf('day');
-      const originalStart = forceUpdateZone(
-        parseDateTime(event.start.dateTime, { zone: event.start.timeZone }),
-        timeZone
-      ).startOf('day');
+      // Fix: Use parseDateTime().setZone() instead of forceUpdateZone() for proper timezone handling
+      // forceUpdateZone uses keepLocalTime: true which corrupts timestamps when device timezone
+      // differs from business timezone, causing drag to fail for events near midnight
+      const eventStart = parseDateTime(event._internal.startUnix)
+        .setZone(timeZone)
+        .startOf('day');
+      const originalStart = parseDateTime(event.start.dateTime, { zone: event.start.timeZone })
+        .setZone(timeZone)
+        .startOf('day');
       const startIndex = eventStart.diff(originalStart, 'days').days;
       triggerDragEvent!(
         {
