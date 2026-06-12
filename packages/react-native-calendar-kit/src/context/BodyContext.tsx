@@ -40,6 +40,7 @@ export interface BodyContextProps {
   calendarData: DataByMode;
   renderHour?: (props: RenderHourProps) => React.ReactNode;
   renderHalfHour?: (props: RenderHourProps) => React.ReactNode;
+  renderQuarterHour?: (props: RenderHourProps) => React.ReactNode;
   renderCustomOutOfRange?: (props: OutOfRangeProps) => React.ReactNode;
   renderCustomUnavailableHour?: (
     props: UnavailableHourProps & {
