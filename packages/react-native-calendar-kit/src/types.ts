@@ -1016,6 +1016,18 @@ export interface CalendarBodyProps {
    * Default: `'rgba(0,0,0,0.3)'`
    */
   tapFeedbackBorderColor?: string;
+
+  /**
+   * Style for the day-end boundary line shown between days in resource scroll mode.
+   * Providing this object enables the line. Omit to disable.
+   *
+   * Defaults when enabled: `{ borderWidth: 1, borderStyle: 'dashed', borderColor: theme.colors.border }`
+   */
+  dayEndLineStyle?: {
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted';
+    borderColor?: string;
+  };
 }
 
 export interface RenderHourProps {

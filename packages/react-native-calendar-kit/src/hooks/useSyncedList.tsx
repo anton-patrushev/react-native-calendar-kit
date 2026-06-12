@@ -16,6 +16,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
     visibleDateUnixAnim,
     visibleWeeks,
     linkedScrollGroup,
+    hapticService,
   } = useCalendar();
   const currentUnix = useDateChangedListener();
   const notifyDateChanged = useNotifyDateChanged();
@@ -81,6 +82,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
         }
 
         if (visibleDateUnix.current !== currentDate) {
+          hapticService.selection();
           const dateIsoStr = dateTimeToISOString(parseDateTime(currentDate));
           onChange?.(dateIsoStr);
           visibleDateUnix.current = currentDate;
@@ -120,6 +122,7 @@ const useSyncedList = ({ id }: { id: ScrollType }) => {
       currentUnix,
       onDateChanged,
       notifyDateChanged,
+      hapticService,
     ]
   );
 

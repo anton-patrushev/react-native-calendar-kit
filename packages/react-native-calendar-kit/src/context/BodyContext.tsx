@@ -63,6 +63,11 @@ export interface BodyContextProps {
   gridListRef: AnimatedRef<Animated.ScrollView>;
   resourcePerPage: number;
   enableResourceScroll: boolean;
+  dayEndLineStyle?: {
+    borderWidth: number;
+    borderStyle: 'solid' | 'dashed' | 'dotted';
+    borderColor: string;
+  };
 }
 
 export const BodyContext = React.createContext<BodyContextProps | undefined>(

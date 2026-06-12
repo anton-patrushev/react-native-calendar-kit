@@ -23,9 +23,11 @@ import UnavailableHoursByResource from './UnavailableHoursByResource';
 interface ResourceBoardProps {
   resources: ResourceItem[];
   visibleDates: Record<string, { diffDays: number; unix: number }>;
+  isDayEnd?: boolean;
+  isDayStart?: boolean;
 }
 
-const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
+const ResourceBoard = ({ resources, visibleDates, isDayEnd, isDayStart }: ResourceBoardProps) => {
   const colors = useTheme((state) => state.colors);
 
   const {
@@ -39,7 +41,8 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
     resourcePerPage,
     spaceFromBottom,
     timelineHeight,
-    showQuarterHourLines
+    showQuarterHourLines,
+    dayEndLineStyle: dayEndLineStyleFromContext,
   } = useBody();
 
   const { timeZone } = useTimezone();
@@ -98,10 +101,29 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
     }
   };
 
+  // Resolve the day-end line style with theme border color as default
+  const resolvedDayEndLineStyle = useMemo(() => {
+    if (!dayEndLineStyleFromContext) return undefined;
+    return {
+      ...dayEndLineStyleFromContext,
+      borderColor: dayEndLineStyleFromContext.borderColor || colors.border,
+    };
+  }, [dayEndLineStyleFromContext, colors.border]);
+
   const _renderVerticalLines = useMemo(() => {
     const lines: React.ReactNode[] = [];
 
     for (let i = 0; i <= resources.length; i++) {
+      // Skip the left border on the first resource of a new day
+      // to avoid overlapping the dashed day-end line from the previous item
+      if (isDayStart && i === 0) {
+        continue;
+      }
+
+      // When isDayEnd, render the rightmost line with the day-end style
+      const isRightEdge = i === resources.length;
+      const isDayBoundary = isRightEdge && isDayEnd && !!resolvedDayEndLineStyle;
+
       lines.push(
         <VerticalLine
           key={i}
@@ -109,11 +131,12 @@ const ResourceBoard = ({ resources, visibleDates }: ResourceBoardProps) => {
           index={i}
           columnWidth={columnWidth}
           childColumns={resourcePerPage}
+          dayEndLineStyle={isDayBoundary ? resolvedDayEndLineStyle : undefined}
         />
       );
     }
     return lines;
-  }, [resources.length, colors.border, columnWidth, resourcePerPage]);
+  }, [resources.length, colors.border, columnWidth, resourcePerPage, isDayEnd, isDayStart, resolvedDayEndLineStyle]);
 
   const _renderHorizontalLines = useMemo(() => {
     const rows: React.ReactNode[] = [];

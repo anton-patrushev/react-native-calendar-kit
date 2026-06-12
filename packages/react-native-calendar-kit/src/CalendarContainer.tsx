@@ -955,6 +955,7 @@ const CalendarContainer: React.ForwardRefRenderFunction<
           : visibleDateUnix.current;
 
       if (activeDayUnix && activeDayUnix !== visibleDateUnix.current) {
+        hapticService.selection();
         visibleDateUnix.current = activeDayUnix;
         visibleDateUnixAnim.value = activeDayUnix;
         visibleDateRef.current?.updateVisibleDate(activeDayUnix);
