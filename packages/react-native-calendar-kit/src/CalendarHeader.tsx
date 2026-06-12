@@ -25,7 +25,7 @@ import {
 import { useCalendar } from './context/CalendarProvider';
 import type { HeaderContextProps } from './context/DayBarContext';
 import { HeaderContext } from './context/DayBarContext';
-import { useEventCountsByWeek, useResources } from './context/EventsProvider';
+import { useEventCountsByWeek } from './context/EventsProvider';
 import { useTheme } from './context/ThemeProvider';
 import useSyncedList from './hooks/useSyncedList';
 import type { CalendarHeaderProps, ResourceItem } from './types';
@@ -73,6 +73,13 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     resourcePagingEnabled,
     linkedScrollGroup,
     dateResourceItems,
+    // Prop-synced resources (from CalendarProvider), NOT the EventsProvider
+    // store. The store's `resources` is written inside `notifyDataChanged` (an
+    // effect), so `useResources()` lags the `resources` prop by a commit. On a
+    // single -> multi transition that lag renders the resource header empty for
+    // a frame; reading the prop-synced value here keeps the header content in
+    // step with the layout that depends on it.
+    resources,
   } = useCalendar();
 
   const effectiveDayBarScrollEnabled =
@@ -83,7 +90,6 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     onScrollBeginDrag: linkedOnScrollBeginDrag,
     onMomentumScrollBegin: linkedOnMomentumScrollBegin,
   } = linkedScrollGroup.addAndGet(ScrollType.dayBar, dayBarListRef);
-  const resources = useResources();
 
   const headerStyles = useTheme(
     useCallback(
@@ -385,6 +391,24 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     height: height.value,
   }));
 
+  // When `useAllDayEvent` is false (no expandable all-day row) the header
+  // heights are constant per render, so drive them with PLAIN static values
+  // instead of Reanimated animated heights.
+  // `headerContainerStyle`/`headerContentStyle` are `useDerivedValue`s that read
+  // the `dayBarHeight` prop; on Fabric, when `dayBarHeight` flips 0 -> N
+  // (single -> multi provider) during the post-load re-render storm, the
+  // animated height can fail to re-commit and the header ScrollView stays
+  // clipped at the stale 0 — the avatar cells lay out (Yoga measures ~24px) but
+  // are clipped to invisible: a blank white band. A static height updates
+  // synchronously with the prop on the React commit, so nothing can strand. The
+  // animated hooks stay (rules of hooks) and are still applied when
+  // `useAllDayEvent` is true, where the expand/collapse animation needs them.
+  const staticContainerHeight = dayBarHeight;
+  const staticContentHeight =
+    numberOfDays === 1
+      ? Math.max(dayBarHeight, headerBottomHeight + 10)
+      : dayBarHeight;
+
   return (
     <View
       style={[
@@ -397,13 +421,16 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
         { width: calendarLayout.width },
       ]}>
       <Animated.ScrollView
-        style={headerContainerStyle}
+        style={useAllDayEvent ? headerContainerStyle : { height: staticContainerHeight }}
         alwaysBounceVertical={false}
         bounces={false}
         overScrollMode="never">
         <HeaderContext.Provider value={value}>
           <Animated.View
-            style={[{ width: calendarLayout.width }, headerContentStyle]}>
+            style={[
+              { width: calendarLayout.width },
+              useAllDayEvent ? headerContentStyle : { height: staticContentHeight },
+            ]}>
             {/* Left area (week-number / expand button placeholder) always
                 renders so the header's day list starts at x=hourWidth in
                 every mode — matches the body-level TimeColumn position. */}
@@ -439,6 +466,11 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
               ) : (
                 <CalendarListView
                   animatedRef={dayBarListRef}
+                  // Match the ResourceListView branch: without an explicit
+                  // height the inner ScrollView collapses to 0 and the header
+                  // cells (height: '100%') resolve to 0px — rendered but
+                  // invisible in byDay mode.
+                  height={dayBarHeight}
                   count={calendarData.count}
                   width={calendarGridWidth}
                   renderItem={_renderHeaderItem}
