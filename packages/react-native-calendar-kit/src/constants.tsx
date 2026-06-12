@@ -67,4 +67,10 @@ export const DEFAULT_ALL_DAY_MINUTES = 20;
 
 export const DEFAULT_MIN_START_DIFFERENCE = 30;
 
+export const DEFAULT_MIN_START_DIFF_FOR_STACK = 30;
+export const DEFAULT_DURATION_DIFF_THRESHOLD = 30;
+export const DEFAULT_STACK_OFFSET = 10;
+export const DEFAULT_MAX_STACK_OFFSET_PERCENTAGE = 40;
+export const DEFAULT_SIDE_BY_SIDE_GAP = 1;
+
 export const IS_WEB = Platform.OS === 'web';
