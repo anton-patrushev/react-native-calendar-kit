@@ -57,6 +57,7 @@ interface CalendarListProps {
   scrollEnabled?: boolean;
   onLoad?: () => void;
   onTouchStart?: (event: GestureResponderEvent) => void;
+  decelerationRate?: 'fast' | 'normal' | number;
 
   /**
    * Fires if a user initiates a scroll gesture.
@@ -131,6 +132,7 @@ export const CalendarList = React.forwardRef<
       onMomentumScrollEnd,
       onScrollEndDrag,
       onWheel,
+      decelerationRate,
     },
     ref
   ) => {
@@ -296,6 +298,7 @@ export const CalendarList = React.forwardRef<
         snapToInterval={snapToInterval}
         onTouchStart={onTouchStart}
         snapToOffsets={snapToOffsets}
+        decelerationRate={decelerationRate}
         {...{ onWheel }}>
         <HorizontalVirtualizedList
           count={count}
