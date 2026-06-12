@@ -7,6 +7,7 @@ import {
   GestureResponderEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
 } from 'react-native';
 
 const MAX_OFFSETS = 180537;
@@ -115,17 +116,48 @@ const CalendarListView = forwardRef<CalendarListRef, CalendarListViewProps>(
     }, [columnsPerPage, snapToInterval, width]);
 
     const _snapToOffsets = useMemo(() => {
-      if (!baseOffsets) {
+      if (baseOffsets) {
+        // Per-column snapping (scrollByDay / resource day-scroll): one snap
+        // point per visible column.
+        const offsets = [];
+        for (let page = 0; page < count; page++) {
+          offsets.push(...baseOffsets.map((offset) => offset + page * width));
+        }
+        if (offsets.length > MAX_OFFSETS) {
+          console.warn('The number of days to display is too large');
+        }
+        return offsets;
+      }
+
+      // Plain day/week paging (no per-column snapToInterval): snap to one page
+      // (itemSize === one day in day view, one week in week view) per swipe.
+      // Without explicit snap offsets the grid relies solely on `pagingEnabled`,
+      // which does NOT constrain momentum on the New-Architecture ScrollView
+      // wrapping the virtualized list — a fast flick free-flings across the
+      // entire date range and lands on an arbitrary far date (observed jumps to
+      // 2031 / 2022). Enumerating page offsets makes `disableIntervalMomentum`
+      // engage downstream, capping a flick at exactly one page.
+      //
+      // iOS ONLY. On Android the multi-thousand-entry offsets array froze the
+      // grid and bled the now-line onto non-current pages, and Android did not
+      // show the far-jump anyway. Returning undefined here keeps Android on its
+      // original behavior: native `pagingEnabled` (the pre-fix `!snapToInterval`),
+      // no offsets array, default deceleration.
+      if (Platform.OS !== 'ios') {
         return undefined;
       }
-      const offsets = [];
+      if (!width || count <= 0) {
+        return undefined;
+      }
+      const pageOffsets = [];
       for (let page = 0; page < count; page++) {
-        offsets.push(...baseOffsets.map((offset) => offset + page * width));
+        pageOffsets.push(page * width);
       }
-      if (offsets.length > MAX_OFFSETS) {
-        console.warn('The number of days to display is too large');
+      if (pageOffsets.length > MAX_OFFSETS) {
+        // Range too large to enumerate; fall back to pagingEnabled.
+        return undefined;
       }
-      return offsets;
+      return pageOffsets;
     }, [baseOffsets, count, width]);
 
     const keyExtractor = useCallback((item: number) => item.toString(), []);
@@ -138,7 +170,8 @@ const CalendarListView = forwardRef<CalendarListRef, CalendarListViewProps>(
         renderItem={_renderItem}
         itemSize={width}
         style={{ height }}
-        pagingEnabled={!snapToInterval}
+        pagingEnabled={!snapToInterval && !_snapToOffsets}
+        decelerationRate={_snapToOffsets ? 'fast' : undefined}
         initialOffset={initialOffset}
         snapToOffsets={_snapToOffsets}
         drawDistance={width * renderAheadItem}
