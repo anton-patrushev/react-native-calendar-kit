@@ -366,15 +366,13 @@ const CalendarBody: React.FC<CalendarBodyProps> = ({
               ]}>
               <View
                 style={[
-                  styles.absolute,
-                  { top: -EXTRA_HEIGHT, width: calendarLayout.width },
+                  { transform: [{ translateY: -EXTRA_HEIGHT }], width: calendarLayout.width },
                 ]}>
                 {(numberOfDays > 1 || !!resources) && <TimeColumn />}
                 <View
                   style={[
-                    styles.absolute,
                     {
-                      left: Math.max(0, leftSize - 1),
+                      transform: [{ translateX: Math.max(0, leftSize - 1) }],
                       width: calendarLayout.width - leftSize,
                     },
                   ]}>
